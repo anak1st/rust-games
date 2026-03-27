@@ -7,3 +7,5 @@ description = "Rust Games"
 [dependencies]
 anyhow = "1.0.102"
 clap = { version = "4.6.0", features = ["derive"] }
+crossterm = "0.29.0"
+ratatui = "0.30.0"
