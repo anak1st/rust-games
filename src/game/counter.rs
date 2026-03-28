@@ -57,9 +57,6 @@ impl Game for CounterGame {
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event.code {
-            KeyCode::Char('r') => {
-                self.counter = 0;
-            }
             KeyCode::Left => self.counter -= 1,
             KeyCode::Right => self.counter += 1,
             _ => {}

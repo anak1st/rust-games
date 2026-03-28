@@ -54,10 +54,11 @@ enum Screen {
 #[derive(Debug, Default)]
 pub struct App {
     exit: bool,
-    index: usize,
-    paused: bool,
-    game: Option<Box<dyn Game>>,
     screen: Screen,
+    index: usize,
+    game: Option<Box<dyn Game>>,
+    game_size: Option<GameSize>,
+    paused: bool,
 }
 
 impl App {
@@ -65,7 +66,7 @@ impl App {
     pub fn new(game: Option<GameKind>) -> Self {
         let mut app = Self::default();
         if let Some(game) = game {
-            app.open_game(game);
+            app.start_game(game);
         }
         app
     }
@@ -79,17 +80,9 @@ impl App {
         Ok(())
     }
 
-    /// 打开所选游戏，并重置应用层的游戏状态。
-    fn open_game(&mut self, game: GameKind) {
-        let game_size = Self::current_game_size();
-        match game {
-            GameKind::Counter => {
-                self.index = 0;
-                self.paused = false;
-                self.game = Some(Box::new(CounterGame::new(game_size)));
-                self.screen = Screen::Game;
-            }
-        }
+    /// 将整个应用标记为退出状态。
+    fn exit(&mut self) {
+        self.exit = true;
     }
 
     /// 从当前游戏返回主界面。
@@ -97,17 +90,35 @@ impl App {
         self.index = 0;
         self.paused = false;
         self.game = None;
+        self.game_size = None;
         self.screen = Screen::Main;
     }
 
-    /// 将整个应用标记为退出状态。
-    fn exit(&mut self) {
-        self.exit = true;
+    /// 打开所选游戏，并重置应用层的游戏状态。
+    fn start_game(&mut self, game: GameKind) {
+        let game_size = Self::current_game_size();
+        let game_instance: Box<dyn Game> = match game {
+            GameKind::Counter => Box::new(CounterGame::new(game_size)),
+        };
+        self.index = GAMES
+            .iter()
+            .position(|candidate| *candidate == game)
+            .unwrap_or_default();
+        self.paused = false;
+        self.game = Some(game_instance);
+        self.screen = Screen::Game;
+        self.game_size = Some(game_size);
     }
 
     /// 切换当前游戏界面的应用层暂停状态。
-    fn pause(&mut self) {
+    fn pause_game(&mut self) {
         self.paused = !self.paused;
+    }
+
+    fn restart_game(&mut self) {
+        if let Some(game) = GAMES.get(self.index).copied() {
+            self.start_game(game);
+        }
     }
 
     /// 根据当前界面分发绘制逻辑。
@@ -253,9 +264,24 @@ impl App {
             Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
                 self.handle_key_event(key_event)
             }
+            Event::Resize(width, height) => self.handle_resize(width, height),
             _ => {}
         };
         Ok(())
+    }
+
+    fn handle_resize(&mut self, width: u16, height: u16) {
+        if self.screen != Screen::Game {
+            return;
+        }
+        let game_size = GameSize {
+            width: width - STATUS_WIDTH - 2,
+            height: height - TITLE_HEIGHT - FOOTER_HEIGHT - 2,
+        };
+        if self.game_size == Some(game_size) {
+            return;
+        }
+        self.restart_game();
     }
 
     /// 将按键事件分发给当前界面对应的处理函数。
@@ -272,7 +298,7 @@ impl App {
             KeyCode::Char('q') => self.exit(),
             KeyCode::Up => self.index = (self.index + 1) % GAMES.len(),
             KeyCode::Down => self.index = (self.index + GAMES.len() - 1) % GAMES.len(),
-            KeyCode::Enter => self.open_game(GAMES[self.index]),
+            KeyCode::Enter => self.start_game(GAMES[self.index]),
             _ => {}
         }
     }
@@ -283,8 +309,12 @@ impl App {
             self.return_to_main();
             return;
         }
+        if matches!(key_event.code, KeyCode::Char('r')) {
+            self.restart_game();
+            return;
+        }
         if matches!(key_event.code, KeyCode::Char('p')) {
-            self.pause();
+            self.pause_game();
             return;
         }
         if self.paused {
