@@ -22,13 +22,13 @@ pub struct Instruction {
 /// 可嵌入应用外壳中的游戏所需遵循的最小约定。
 pub trait Game: Debug {
     /// 返回显示在应用标题栏中的标题。
-    fn title(&self) -> &'static str;
+    fn title(&self) -> String;
     /// 返回当前游戏内容，用于渲染内容区域。
     fn content(&self) -> Text<'static>;
     /// 返回当前游戏状态，用于渲染状态区域。
     fn status(&self) -> Text<'static>;
     /// 返回底部区域使用的帮助说明。
-    fn instructions(&self) -> &'static [Instruction];
+    fn instructions(&self) -> Vec<Instruction>;
     /// 处理游戏按键事件并更新内部状态。
     fn handle_key_event(&mut self, key_event: KeyEvent);
 }

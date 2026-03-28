@@ -6,7 +6,7 @@ use ratatui::{
 
 use crate::game::{Game, Instruction};
 
-const INSTRUCTIONS: [Instruction; 4] = [
+const INSTRUCTIONS: [Instruction; 2] = [
     Instruction {
         label: " Decrement ",
         key: "<Left>",
@@ -14,14 +14,6 @@ const INSTRUCTIONS: [Instruction; 4] = [
     Instruction {
         label: " Increment ",
         key: "<Right>",
-    },
-    Instruction {
-        label: " Pause ",
-        key: "<P>",
-    },
-    Instruction {
-        label: " Restart ",
-        key: "<R>",
     },
 ];
 
@@ -31,29 +23,26 @@ pub struct CounterGame {
 }
 
 impl Game for CounterGame {
-    fn title(&self) -> &'static str {
-        "Counter Demo"
+    fn title(&self) -> String {
+        "Counter Demo".to_string()
     }
 
     fn content(&self) -> Text<'static> {
-        Text::from(vec![
-            Line::from("Counter Demo".bold()),
-            Line::from(""),
-            Line::from("这里先放最小的游戏区域。"),
-            Line::from(vec!["Value: ".into(), self.counter.to_string().yellow()]),
-        ])
+        Text::from(vec![Line::from(vec![
+            "Value: ".into(),
+            self.counter.to_string().yellow(),
+        ])])
     }
 
     fn status(&self) -> Text<'static> {
-        Text::from(vec![
-            Line::from("Game Status".bold()),
-            Line::from(""),
-            Line::from(vec!["Counter: ".into(), self.counter.to_string().yellow()]),
-        ])
+        Text::from(vec![Line::from(vec![
+            "Counter: ".into(),
+            self.counter.to_string().yellow(),
+        ])])
     }
 
-    fn instructions(&self) -> &'static [Instruction] {
-        &INSTRUCTIONS
+    fn instructions(&self) -> Vec<Instruction> {
+        INSTRUCTIONS.to_vec()
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {

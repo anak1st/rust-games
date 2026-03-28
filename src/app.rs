@@ -26,6 +26,17 @@ const MAIN_INSTRUCTIONS: [Instruction; 3] = [
     },
 ];
 
+const COMMON_INSTRUCTIONS: [Instruction; 2] = [
+    Instruction {
+        label: " Pause ",
+        key: "<P>",
+    },
+    Instruction {
+        label: " Restart ",
+        key: "<R>",
+    },
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum Screen {
     #[default]
@@ -36,10 +47,10 @@ enum Screen {
 #[derive(Debug, Default)]
 pub struct App {
     exit: bool,
-    screen: Screen,
     index: usize,
     paused: bool,
     game: Option<Box<dyn Game>>,
+    screen: Screen,
 }
 
 impl App {
@@ -67,8 +78,8 @@ impl App {
             GameKind::Counter => {
                 self.index = 0;
                 self.paused = false;
-                self.screen = Screen::Game;
                 self.game = Some(Box::new(CounterGame::default()));
+                self.screen = Screen::Game;
             }
         }
     }
@@ -131,12 +142,12 @@ impl App {
     /// 渲染当前界面的标题区域。
     fn render_title(&self) -> Paragraph<'static> {
         let title = match self.screen {
-            Screen::Main => "选择游戏",
+            Screen::Main => "选择游戏".to_string(),
             Screen::Game => self
                 .game
                 .as_ref()
                 .map(|game| game.title())
-                .unwrap_or("Unknown Game"),
+                .unwrap_or_else(|| "Unknown Game".to_string()),
         };
         Paragraph::new(title.bold())
             .centered()
@@ -145,7 +156,7 @@ impl App {
 
     /// 渲染主界面上的可选游戏列表。
     fn render_main_content(&self) -> Paragraph<'static> {
-        let mut lines = vec![Line::from("请选择要进入的游戏"), Line::from("")];
+        let mut lines = vec![];
         lines.extend(GAMES.iter().enumerate().map(|(idx, game)| {
             let game_name = match game {
                 GameKind::Counter => "Counter Demo",
@@ -156,11 +167,9 @@ impl App {
                 Line::from(format!("  {game_name}"))
             }
         }));
-        Paragraph::new(Text::from(lines)).centered().block(
-            Block::bordered()
-                .title("Select Game")
-                .border_set(border::THICK),
-        )
+        Paragraph::new(Text::from(lines))
+            .centered()
+            .block(Block::bordered().title("Main").border_set(border::THICK))
     }
 
     /// 渲染当前游戏的内容区域。
@@ -172,7 +181,7 @@ impl App {
             .unwrap_or_else(|| Text::from("No Game"));
         Paragraph::new(text)
             .centered()
-            .block(Block::bordered().title("Content").border_set(border::THICK))
+            .block(Block::bordered().title("Game").border_set(border::THICK))
     }
 
     /// 渲染游戏状态以及应用层的暂停信息。
@@ -182,7 +191,6 @@ impl App {
             .as_ref()
             .map(|game| game.status())
             .unwrap_or_else(|| Text::from("No Status"));
-
         text.lines.push(Line::from(vec![
             "Paused: ".into(),
             if self.paused {
@@ -191,34 +199,31 @@ impl App {
                 "no".green()
             },
         ]));
-        text.lines.push(Line::from("Q / Esc: back to main".blue()));
-
         Paragraph::new(text).block(Block::bordered().title("Status").border_set(border::THICK))
     }
 
     /// 渲染当前界面底部的帮助提示行。
     fn render_footer(&self) -> Paragraph<'static> {
         let instructions = match self.screen {
-            Screen::Main => &MAIN_INSTRUCTIONS[..],
-            Screen::Game => self
-                .game
-                .as_ref()
-                .map(|game| game.instructions())
-                .unwrap_or(&[]),
+            Screen::Main => MAIN_INSTRUCTIONS.to_vec(),
+            Screen::Game => {
+                let mut instructions = self
+                    .game
+                    .as_ref()
+                    .map(|game| game.instructions())
+                    .unwrap_or_default();
+                instructions.extend_from_slice(&COMMON_INSTRUCTIONS);
+                instructions
+            }
         };
-        Paragraph::new(Text::from(vec![self.render_instruction(instructions)]))
-            .centered()
-            .block(Block::bordered().title("Help").border_set(border::THICK))
-    }
-
-    /// 将指令列表转换为一行带样式的帮助提示。
-    fn render_instruction(&self, instructions: &[Instruction]) -> Line<'static> {
         let mut spans = Vec::with_capacity(instructions.len() * 2);
-        for instruction in instructions {
+        for instruction in &instructions {
             spans.push(instruction.label.into());
             spans.push(instruction.key.blue().bold());
         }
-        Line::from(spans)
+        Paragraph::new(Text::from(vec![Line::from(spans)]))
+            .centered()
+            .block(Block::bordered().title("Help").border_set(border::THICK))
     }
 
     /// 读取终端事件，并将支持的按键事件转发给应用。
