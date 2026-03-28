@@ -9,7 +9,7 @@ use ratatui::{
     style::Stylize,
     symbols::border,
     text::{Line, Text},
-    widgets::{Block, Paragraph},
+    widgets::{Block, Clear, Paragraph},
 };
 
 use crate::game::{GAMES, Game, GameKind, GameSize, Instruction, counter::CounterGame};
@@ -20,26 +20,26 @@ const STATUS_WIDTH: u16 = 24;
 
 const MAIN_INSTRUCTIONS: [Instruction; 3] = [
     Instruction {
-        label: " Move ",
+        label: " 移动 ",
         key: "<Up/Down>",
     },
     Instruction {
-        label: " Enter ",
+        label: " 进入 ",
         key: "<Enter>",
     },
     Instruction {
-        label: " Quit ",
+        label: " 退出 ",
         key: "<Q> ",
     },
 ];
 
 const COMMON_INSTRUCTIONS: [Instruction; 2] = [
     Instruction {
-        label: " Pause ",
+        label: " 暂停 ",
         key: "<P>",
     },
     Instruction {
-        label: " Restart ",
+        label: " 重开 ",
         key: "<R>",
     },
 ];
@@ -51,6 +51,28 @@ enum Screen {
     Game,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum GameStatus {
+    #[default]
+    Main,
+    Running,
+    Paused,
+    Won,
+    Lost,
+}
+
+impl GameStatus {
+    fn label(self) -> &'static str {
+        match self {
+            GameStatus::Main => "Main",
+            GameStatus::Running => "Running",
+            GameStatus::Paused => "Paused",
+            GameStatus::Won => "Won",
+            GameStatus::Lost => "Lost",
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct App {
     exit: bool,
@@ -58,7 +80,7 @@ pub struct App {
     game_index: usize,
     game: Option<Box<dyn Game>>,
     game_size: Option<GameSize>,
-    game_paused: bool,
+    game_status: GameStatus,
 }
 
 impl App {
@@ -92,9 +114,9 @@ impl App {
     /// 从当前游戏返回主界面。
     fn return_to_main(&mut self) {
         self.game_index = 0;
-        self.game_paused = false;
         self.game = None;
         self.game_size = None;
+        self.game_status = GameStatus::Main;
         self.screen = Screen::Main;
     }
 
@@ -102,18 +124,24 @@ impl App {
     fn start_game(&mut self) {
         let game = GAMES[self.game_index];
         let game_size = Self::current_game_size();
-        let game_instance: Box<dyn Game> = match game {
+        self.game = Some(match game {
             GameKind::Counter => Box::new(CounterGame::new(game_size)),
-        };
-        self.game_paused = false;
-        self.game = Some(game_instance);
-        self.screen = Screen::Game;
+        });
         self.game_size = Some(game_size);
+        self.game_status = GameStatus::Running;
+        self.screen = Screen::Game;
     }
 
     /// 切换当前游戏界面的应用层暂停状态。
     fn pause_game(&mut self) {
-        self.game_paused = !self.game_paused;
+        if matches!(self.game_status, GameStatus::Running) {
+            self.game_status = GameStatus::Paused;
+            return;
+        }
+        if matches!(self.game_status, GameStatus::Paused) {
+            self.game_status = GameStatus::Running;
+            return;
+        }
     }
 
     /// 根据当前界面分发绘制逻辑。
@@ -152,6 +180,22 @@ impl App {
         frame.render_widget(self.render_game_content(), content_area);
         frame.render_widget(self.render_game_status(), status_area);
         frame.render_widget(self.render_footer(), footer_area);
+        if matches!(self.game_status, GameStatus::Paused) {
+            let [_, popup_area, _] = Layout::vertical([
+                Constraint::Fill(1),
+                Constraint::Length(7),
+                Constraint::Fill(1),
+            ])
+            .areas(content_area);
+            let [_, popup_area, _] = Layout::horizontal([
+                Constraint::Fill(1),
+                Constraint::Length(32),
+                Constraint::Fill(1),
+            ])
+            .areas(popup_area);
+            frame.render_widget(Clear, popup_area);
+            frame.render_widget(self.render_game_popup(self.game_status), popup_area);
+        }
     }
 
     fn current_game_size() -> GameSize {
@@ -217,11 +261,10 @@ impl App {
             .map(|game| game.status())
             .unwrap_or_else(|| Text::from("No Status"));
         text.lines.push(Line::from(vec![
-            "Paused: ".into(),
-            if self.game_paused {
-                "yes".yellow()
-            } else {
-                "no".green()
+            "Status: ".into(),
+            match self.game_status {
+                GameStatus::Paused => self.game_status.label().yellow(),
+                _ => self.game_status.label().green(),
             },
         ]));
         Paragraph::new(text).block(Block::bordered().title("Status").border_set(border::THICK))
@@ -249,6 +292,27 @@ impl App {
         Paragraph::new(Text::from(vec![Line::from(spans)]))
             .centered()
             .block(Block::bordered().title("Help").border_set(border::THICK))
+    }
+
+    fn render_game_popup(&self, game_status: GameStatus) -> Paragraph<'static> {
+        let (title, lines) = match game_status {
+            GameStatus::Main => unreachable!(),
+            GameStatus::Running => unreachable!(),
+            GameStatus::Paused => (
+                "暂停",
+                vec![
+                    Line::from("游戏已暂停").centered(),
+                    Line::from(""),
+                    Line::from("按 P 继续").centered(),
+                    Line::from("按 R 重新开始").centered(),
+                    Line::from("按 Q 返回主界面").centered(),
+                ],
+            ),
+            GameStatus::Won => unreachable!(),
+            GameStatus::Lost => unreachable!(),
+        };
+        Paragraph::new(Text::from(lines))
+            .block(Block::bordered().title(title).border_set(border::THICK))
     }
 
     /// 读取终端事件，并将支持的按键事件转发给应用。
@@ -312,7 +376,7 @@ impl App {
             self.pause_game();
             return;
         }
-        if self.game_paused {
+        if self.game_status != GameStatus::Running {
             return;
         }
         if let Some(game) = self.game.as_mut() {

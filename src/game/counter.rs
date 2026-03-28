@@ -8,11 +8,11 @@ use crate::game::{Game, GameSize, Instruction};
 
 const INSTRUCTIONS: [Instruction; 2] = [
     Instruction {
-        label: " Decrement ",
+        label: " 减少 ",
         key: "<Left>",
     },
     Instruction {
-        label: " Increment ",
+        label: " 增加 ",
         key: "<Right>",
     },
 ];
