@@ -55,10 +55,10 @@ enum Screen {
 pub struct App {
     exit: bool,
     screen: Screen,
-    index: usize,
+    game_index: usize,
     game: Option<Box<dyn Game>>,
     game_size: Option<GameSize>,
-    paused: bool,
+    game_paused: bool,
 }
 
 impl App {
@@ -66,7 +66,11 @@ impl App {
     pub fn new(game: Option<GameKind>) -> Self {
         let mut app = Self::default();
         if let Some(game) = game {
-            app.start_game(game);
+            app.game_index = GAMES
+                .iter()
+                .position(|candidate| *candidate == game)
+                .unwrap_or_default();
+            app.start_game();
         }
         app
     }
@@ -87,24 +91,21 @@ impl App {
 
     /// 从当前游戏返回主界面。
     fn return_to_main(&mut self) {
-        self.index = 0;
-        self.paused = false;
+        self.game_index = 0;
+        self.game_paused = false;
         self.game = None;
         self.game_size = None;
         self.screen = Screen::Main;
     }
 
     /// 打开所选游戏，并重置应用层的游戏状态。
-    fn start_game(&mut self, game: GameKind) {
+    fn start_game(&mut self) {
+        let game = GAMES[self.game_index];
         let game_size = Self::current_game_size();
         let game_instance: Box<dyn Game> = match game {
             GameKind::Counter => Box::new(CounterGame::new(game_size)),
         };
-        self.index = GAMES
-            .iter()
-            .position(|candidate| *candidate == game)
-            .unwrap_or_default();
-        self.paused = false;
+        self.game_paused = false;
         self.game = Some(game_instance);
         self.screen = Screen::Game;
         self.game_size = Some(game_size);
@@ -112,13 +113,7 @@ impl App {
 
     /// 切换当前游戏界面的应用层暂停状态。
     fn pause_game(&mut self) {
-        self.paused = !self.paused;
-    }
-
-    fn restart_game(&mut self) {
-        if let Some(game) = GAMES.get(self.index).copied() {
-            self.start_game(game);
-        }
+        self.game_paused = !self.game_paused;
     }
 
     /// 根据当前界面分发绘制逻辑。
@@ -187,11 +182,11 @@ impl App {
     /// 渲染主界面上的可选游戏列表。
     fn render_main_content(&self) -> Paragraph<'static> {
         let mut lines = vec![];
-        lines.extend(GAMES.iter().enumerate().map(|(idx, game)| {
+        lines.extend(GAMES.iter().enumerate().map(|(index, game)| {
             let game_name = match game {
                 GameKind::Counter => "Counter Demo",
             };
-            if idx == self.index {
+            if index == self.game_index {
                 Line::from(format!("> {game_name}")).yellow()
             } else {
                 Line::from(format!("  {game_name}"))
@@ -223,7 +218,7 @@ impl App {
             .unwrap_or_else(|| Text::from("No Status"));
         text.lines.push(Line::from(vec![
             "Paused: ".into(),
-            if self.paused {
+            if self.game_paused {
                 "yes".yellow()
             } else {
                 "no".green()
@@ -281,7 +276,7 @@ impl App {
         if self.game_size == Some(game_size) {
             return;
         }
-        self.restart_game();
+        self.start_game();
     }
 
     /// 将按键事件分发给当前界面对应的处理函数。
@@ -296,9 +291,9 @@ impl App {
     fn handle_main_keys(&mut self, key_event: KeyEvent) {
         match key_event.code {
             KeyCode::Char('q') => self.exit(),
-            KeyCode::Up => self.index = (self.index + 1) % GAMES.len(),
-            KeyCode::Down => self.index = (self.index + GAMES.len() - 1) % GAMES.len(),
-            KeyCode::Enter => self.start_game(GAMES[self.index]),
+            KeyCode::Up => self.game_index = (self.game_index + 1) % GAMES.len(),
+            KeyCode::Down => self.game_index = (self.game_index + GAMES.len() - 1) % GAMES.len(),
+            KeyCode::Enter => self.start_game(),
             _ => {}
         }
     }
@@ -310,14 +305,14 @@ impl App {
             return;
         }
         if matches!(key_event.code, KeyCode::Char('r')) {
-            self.restart_game();
+            self.start_game();
             return;
         }
         if matches!(key_event.code, KeyCode::Char('p')) {
             self.pause_game();
             return;
         }
-        if self.paused {
+        if self.game_paused {
             return;
         }
         if let Some(game) = self.game.as_mut() {
