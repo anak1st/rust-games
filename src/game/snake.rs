@@ -73,17 +73,6 @@ impl Direction {
         }
     }
 
-    /// 判断两个方向是否彼此相反。
-    fn is_opposite(self, other: Direction) -> bool {
-        matches!(
-            (self, other),
-            (Direction::Up, Direction::Down)
-                | (Direction::Down, Direction::Up)
-                | (Direction::Left, Direction::Right)
-                | (Direction::Right, Direction::Left)
-        )
-    }
-
     /// 返回当前方向的反方向。
     fn opposite(self) -> Direction {
         match self {
@@ -92,6 +81,11 @@ impl Direction {
             Direction::Left => Direction::Right,
             Direction::Right => Direction::Left,
         }
+    }
+
+    /// 判断两个方向是否彼此相反。
+    fn is_opposite(self, other: Direction) -> bool {
+        self.opposite() == other
     }
 }
 
@@ -102,7 +96,7 @@ enum SnakeState {
 }
 
 #[derive(Debug)]
-struct SpawnConfig {
+struct SnakeSpawn {
     body: Vec<Point>,
     direction: Direction,
 }
@@ -266,7 +260,7 @@ impl Snake {
     }
 
     /// 使用新的出生点配置重生。
-    fn respawn(&mut self, spawn: SpawnConfig) {
+    fn respawn(&mut self, spawn: SnakeSpawn) {
         self.body = spawn.body;
         self.direction = spawn.direction;
         self.score = 0;
@@ -335,11 +329,11 @@ impl GameSnake {
     }
 
     /// 返回四个角落使用的固定出生点配置。
-    fn corner_spawn_config(size: GameSize, index: usize) -> SpawnConfig {
+    fn corner_spawn_config(size: GameSize, index: usize) -> SnakeSpawn {
         let right = size.width as i16 - 1;
         let bottom = size.height as i16 - 1;
         match index {
-            0 => SpawnConfig {
+            0 => SnakeSpawn {
                 body: vec![
                     Point { x: 0, y: 0 },
                     Point { x: 0, y: 1 },
@@ -347,7 +341,7 @@ impl GameSnake {
                 ],
                 direction: Direction::Right,
             },
-            1 => SpawnConfig {
+            1 => SnakeSpawn {
                 body: vec![
                     Point { x: right, y: 0 },
                     Point { x: right, y: 1 },
@@ -355,7 +349,7 @@ impl GameSnake {
                 ],
                 direction: Direction::Left,
             },
-            2 => SpawnConfig {
+            2 => SnakeSpawn {
                 body: vec![
                     Point { x: 0, y: bottom },
                     Point {
@@ -369,7 +363,7 @@ impl GameSnake {
                 ],
                 direction: Direction::Right,
             },
-            _ => SpawnConfig {
+            _ => SnakeSpawn {
                 body: vec![
                     Point {
                         x: right,
@@ -402,7 +396,7 @@ impl GameSnake {
     }
 
     /// 收集当前可以使用的所有出生点配置。
-    fn spawn_candidates(&self) -> Vec<SpawnConfig> {
+    fn spawn_candidates(&self) -> Vec<SnakeSpawn> {
         let mut candidates = Vec::new();
 
         for index in 0..AI_COUNT {
@@ -431,7 +425,7 @@ impl GameSnake {
                     if !self.can_spawn_body(&body) {
                         continue;
                     }
-                    candidates.push(SpawnConfig { body, direction });
+                    candidates.push(SnakeSpawn { body, direction });
                 }
             }
         }
@@ -530,14 +524,14 @@ impl GameSnake {
             Direction::Right,
         ];
         directions.sort_by_key(|direction| {
-            let next_head = next_head(self.snakes[snake_index].head(), *direction);
+            let next_head = self.snakes[snake_index].head().step(*direction);
             next_head.distance_to(target)
         });
         for direction in directions {
             if direction.is_opposite(self.snakes[snake_index].direction) {
                 continue;
             }
-            let next_head = next_head(self.snakes[snake_index].head(), direction);
+            let next_head = self.snakes[snake_index].head().step(direction);
             let ate_food = self.foods.contains(&next_head);
             let blocked = {
                 let snake = &self.snakes[snake_index];
@@ -648,28 +642,6 @@ impl GameSnake {
             color = self.player.head_color;
         }
         Span::styled(symbol, Style::new().fg(color))
-    }
-}
-
-/// 根据给定方向计算下一步坐标。
-fn next_head(head: Point, direction: Direction) -> Point {
-    match direction {
-        Direction::Up => Point {
-            x: head.x,
-            y: head.y - 1,
-        },
-        Direction::Down => Point {
-            x: head.x,
-            y: head.y + 1,
-        },
-        Direction::Left => Point {
-            x: head.x - 1,
-            y: head.y,
-        },
-        Direction::Right => Point {
-            x: head.x + 1,
-            y: head.y,
-        },
     }
 }
 
