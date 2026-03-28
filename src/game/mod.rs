@@ -5,7 +5,10 @@ use std::fmt::Debug;
 
 use clap::ValueEnum;
 use crossterm::event::KeyEvent;
-use ratatui::{style::Color, text::Text};
+use ratatui::{
+    style::{Color, Style},
+    text::Text,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum GameKind {
@@ -14,6 +17,7 @@ pub enum GameKind {
 }
 
 impl GameKind {
+    /// 返回游戏类型在界面中展示的名称。
     pub fn name(self) -> &'static str {
         match self {
             GameKind::Counter => "计数器",
@@ -41,6 +45,7 @@ pub enum GameStatus {
     #[default]
     Idle,
     Main,
+    Ready,
     Running,
     Paused,
     Won,
@@ -49,10 +54,12 @@ pub enum GameStatus {
 }
 
 impl GameStatus {
+    /// 返回游戏状态在界面中展示的文案。
     pub fn label(self) -> &'static str {
         match self {
             GameStatus::Idle => "空闲",
             GameStatus::Main => "主界面",
+            GameStatus::Ready => "准备",
             GameStatus::Running => "进行中",
             GameStatus::Paused => "已暂停",
             GameStatus::Won => "已胜利",
@@ -61,16 +68,19 @@ impl GameStatus {
         }
     }
 
-    pub fn color(self) -> Color {
-        match self {
+    /// 返回游戏状态在界面中使用的样式。
+    pub fn style(self) -> Style {
+        let color = match self {
             GameStatus::Idle => Color::Gray,
             GameStatus::Main => Color::Cyan,
+            GameStatus::Ready => Color::LightGreen,
             GameStatus::Running => Color::Green,
             GameStatus::Paused => Color::Yellow,
             GameStatus::Won => Color::Green,
             GameStatus::Lost => Color::Red,
             GameStatus::WindowTooSmall => Color::LightMagenta,
-        }
+        };
+        Style::new().fg(color)
     }
 }
 

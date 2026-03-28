@@ -8,7 +8,7 @@ use crossterm::{
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Layout},
-    style::{Color, Style, Styled, Stylize},
+    style::{Styled, Stylize},
     symbols::border,
     text::{Line, Text},
     widgets::{Block, Clear, Paragraph},
@@ -22,8 +22,11 @@ use crate::game::{
 const TITLE_HEIGHT: u16 = 3;
 const FOOTER_HEIGHT: u16 = 3;
 const STATUS_WIDTH: u16 = 24;
+const GAME_MIN_WIDTH: u16 = 32;
+const GAME_MIN_HEIGHT: u16 = 24;
 const UPDATE_INTERVAL: Duration = Duration::from_millis(33);
 
+/// 读取当前终端尺寸并换算出游戏内容区大小。
 fn current_game_size() -> Option<GameSize> {
     let Ok((width, height)) = terminal::size() else {
         return None;
@@ -31,8 +34,12 @@ fn current_game_size() -> Option<GameSize> {
     calculate_game_size(width, height)
 }
 
+/// 根据终端宽高计算游戏内容区大小。
 fn calculate_game_size(width: u16, height: u16) -> Option<GameSize> {
-    if width <= STATUS_WIDTH + 2 || height <= TITLE_HEIGHT + FOOTER_HEIGHT + 2 {
+    if width <= STATUS_WIDTH + 2 + GAME_MIN_WIDTH {
+        return None;
+    }
+    if height <= TITLE_HEIGHT + FOOTER_HEIGHT + GAME_MIN_HEIGHT {
         return None;
     }
     Some(GameSize {
@@ -59,7 +66,7 @@ const MAIN_INSTRUCTIONS: [Instruction; 3] = [
 const COMMON_INSTRUCTIONS: [Instruction; 2] = [
     Instruction {
         label: " 暂停 ",
-        key: "<P>",
+        key: "<Space>",
     },
     Instruction {
         label: " 重开 ",
@@ -142,7 +149,7 @@ impl App {
         });
         self.game_size = game_size;
         self.game_status = if game_size.is_some() {
-            GameStatus::Running
+            GameStatus::Ready
         } else {
             GameStatus::WindowTooSmall
         };
@@ -176,6 +183,7 @@ impl App {
         self.sync_game_status();
     }
 
+    /// 从当前游戏同步应用层关心的特殊状态。
     fn sync_game_status(&mut self) {
         let Some(game) = self.game.as_ref() else {
             return;
@@ -193,6 +201,32 @@ impl App {
         match self.screen {
             Screen::Main => self.render_main(frame),
             Screen::Game => self.render_game(frame),
+        }
+        if matches!(
+            self.game_status,
+            GameStatus::Ready
+                | GameStatus::Paused
+                | GameStatus::Won
+                | GameStatus::Lost
+                | GameStatus::WindowTooSmall
+        ) {
+            // 获取弹窗区域
+            let [_, popup_area, _] = Layout::vertical([
+                Constraint::Fill(1),
+                Constraint::Length(7),
+                Constraint::Fill(1),
+            ])
+            .areas(frame.area());
+            let [_, popup_area, _] = Layout::horizontal([
+                Constraint::Fill(1),
+                Constraint::Length(32),
+                Constraint::Fill(1),
+            ])
+            .areas(popup_area);
+            // 清除弹窗区域
+            frame.render_widget(Clear, popup_area);
+            // 渲染弹窗
+            frame.render_widget(self.render_popup(), popup_area);
         }
     }
 
@@ -224,25 +258,6 @@ impl App {
         frame.render_widget(self.render_game_content(), content_area);
         frame.render_widget(self.render_game_status(), status_area);
         frame.render_widget(self.render_footer(), footer_area);
-        if matches!(
-            self.game_status,
-            GameStatus::Paused | GameStatus::Won | GameStatus::Lost | GameStatus::WindowTooSmall
-        ) {
-            let [_, popup_area, _] = Layout::vertical([
-                Constraint::Fill(1),
-                Constraint::Length(7),
-                Constraint::Fill(1),
-            ])
-            .areas(content_area);
-            let [_, popup_area, _] = Layout::horizontal([
-                Constraint::Fill(1),
-                Constraint::Length(32),
-                Constraint::Fill(1),
-            ])
-            .areas(popup_area);
-            frame.render_widget(Clear, popup_area);
-            frame.render_widget(self.render_game_popup(self.game_status), popup_area);
-        }
     }
 
     /// 渲染当前界面的标题区域。
@@ -293,7 +308,7 @@ impl App {
             .unwrap_or_else(|| Text::from("No Status"));
         text.lines.push(Line::from(vec![
             "状态: ".into(),
-            self.game_status.label().set_style(self.game_status.color()),
+            self.game_status.label().set_style(self.game_status.style()),
         ]));
         Paragraph::new(text).block(Block::bordered().title("Status").border_set(border::THICK))
     }
@@ -322,17 +337,27 @@ impl App {
             .block(Block::bordered().title("Help").border_set(border::THICK))
     }
 
-    fn render_game_popup(&self, game_status: GameStatus) -> Paragraph<'static> {
-        let (title, lines) = match game_status {
+    /// 根据当前应用状态渲染居中的弹窗。
+    fn render_popup(&self) -> Paragraph<'static> {
+        let (title, lines) = match self.game_status {
             GameStatus::Idle => unreachable!(),
             GameStatus::Main => unreachable!(),
             GameStatus::Running => unreachable!(),
+            GameStatus::Ready => (
+                "准备",
+                vec![
+                    Line::from("游戏已准备就绪").centered(),
+                    Line::from(""),
+                    Line::from("按任意键开始").centered(),
+                    Line::from("按 Q 返回主界面").centered(),
+                ],
+            ),
             GameStatus::Paused => (
                 "暂停",
                 vec![
                     Line::from("游戏已暂停").centered(),
                     Line::from(""),
-                    Line::from("按 P 继续").centered(),
+                    Line::from("按 Space 继续").centered(),
                     Line::from("按 R 重新开始").centered(),
                     Line::from("按 Q 返回主界面").centered(),
                 ],
@@ -370,9 +395,9 @@ impl App {
         };
         Paragraph::new(Text::from(lines).centered()).block(
             Block::bordered()
-                .title(Line::from(title).set_style(game_status.color()).bold())
+                .title(Line::from(title).set_style(self.game_status.style()).bold())
                 .border_set(border::THICK)
-                .border_style(game_status.color()),
+                .border_style(self.game_status.style()),
         )
     }
 
@@ -396,6 +421,7 @@ impl App {
         }
     }
 
+    /// 在终端尺寸变化后决定是否重开当前游戏。
     fn handle_resize(&mut self, width: u16, height: u16) {
         if self.screen != Screen::Game {
             return;
@@ -432,11 +458,15 @@ impl App {
             self.return_to_main();
             return;
         }
+        if self.game_status == GameStatus::Ready {
+            self.game_status = GameStatus::Running;
+            return;
+        }
         if matches!(key_event.code, KeyCode::Char('r')) {
             self.start_game();
             return;
         }
-        if matches!(key_event.code, KeyCode::Char('p')) {
+        if matches!(key_event.code, KeyCode::Char(' ')) {
             self.pause_game();
             return;
         }
@@ -446,5 +476,6 @@ impl App {
         if let Some(game) = self.game.as_mut() {
             game.handle_key_event(key_event);
         }
+        self.sync_game_status();
     }
 }

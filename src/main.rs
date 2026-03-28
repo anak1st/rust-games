@@ -13,6 +13,7 @@ struct Args {
     game: Option<GameKind>,
 }
 
+/// 解析命令行参数并启动应用主循环。
 fn main() -> Result<()> {
     let args = Args::parse();
     let mut app = app::App::new(args.game);
