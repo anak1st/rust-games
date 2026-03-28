@@ -1,5 +1,8 @@
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::{
+    event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
+    terminal,
+};
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Layout},
@@ -9,7 +12,11 @@ use ratatui::{
     widgets::{Block, Paragraph},
 };
 
-use crate::game::{GAMES, Game, GameKind, Instruction, counter::CounterGame};
+use crate::game::{GAMES, Game, GameKind, GameSize, Instruction, counter::CounterGame};
+
+const TITLE_HEIGHT: u16 = 3;
+const FOOTER_HEIGHT: u16 = 3;
+const STATUS_WIDTH: u16 = 24;
 
 const MAIN_INSTRUCTIONS: [Instruction; 3] = [
     Instruction {
@@ -74,11 +81,12 @@ impl App {
 
     /// 打开所选游戏，并重置应用层的游戏状态。
     fn open_game(&mut self, game: GameKind) {
+        let game_size = Self::current_game_size();
         match game {
             GameKind::Counter => {
                 self.index = 0;
                 self.paused = false;
-                self.game = Some(Box::new(CounterGame::default()));
+                self.game = Some(Box::new(CounterGame::new(game_size)));
                 self.screen = Screen::Game;
             }
         }
@@ -113,9 +121,9 @@ impl App {
     /// 绘制游戏选择界面。
     fn draw_main(&self, frame: &mut Frame) {
         let [title_area, content_area, footer_area] = Layout::vertical([
-            Constraint::Length(3),
+            Constraint::Length(TITLE_HEIGHT),
             Constraint::Min(0),
-            Constraint::Length(3),
+            Constraint::Length(FOOTER_HEIGHT),
         ])
         .areas(frame.area());
         frame.render_widget(self.render_title(), title_area);
@@ -126,17 +134,28 @@ impl App {
     /// 绘制当前游戏界面，包括内容区和状态区。
     fn draw_game(&self, frame: &mut Frame) {
         let [title_area, content_area, footer_area] = Layout::vertical([
-            Constraint::Length(3),
+            Constraint::Length(TITLE_HEIGHT),
             Constraint::Min(0),
-            Constraint::Length(3),
+            Constraint::Length(FOOTER_HEIGHT),
         ])
         .areas(frame.area());
         let [content_area, status_area] =
-            Layout::horizontal([Constraint::Min(0), Constraint::Length(24)]).areas(content_area);
+            Layout::horizontal([Constraint::Min(0), Constraint::Length(STATUS_WIDTH)])
+                .areas(content_area);
         frame.render_widget(self.render_title(), title_area);
         frame.render_widget(self.render_game_content(), content_area);
         frame.render_widget(self.render_game_status(), status_area);
         frame.render_widget(self.render_footer(), footer_area);
+    }
+
+    fn current_game_size() -> GameSize {
+        let Ok((width, height)) = terminal::size() else {
+            return GameSize::default();
+        };
+        GameSize {
+            width: width - STATUS_WIDTH - 2,
+            height: height - TITLE_HEIGHT - FOOTER_HEIGHT - 2,
+        }
     }
 
     /// 渲染当前界面的标题区域。

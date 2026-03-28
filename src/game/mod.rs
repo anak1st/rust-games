@@ -19,6 +19,12 @@ pub struct Instruction {
     pub key: &'static str,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GameSize {
+    pub width: u16,
+    pub height: u16,
+}
+
 /// 可嵌入应用外壳中的游戏所需遵循的最小约定。
 pub trait Game: Debug {
     /// 返回显示在应用标题栏中的标题。

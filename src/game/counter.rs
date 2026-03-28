@@ -4,7 +4,7 @@ use ratatui::{
     text::{Line, Text},
 };
 
-use crate::game::{Game, Instruction};
+use crate::game::{Game, GameSize, Instruction};
 
 const INSTRUCTIONS: [Instruction; 2] = [
     Instruction {
@@ -20,6 +20,13 @@ const INSTRUCTIONS: [Instruction; 2] = [
 #[derive(Debug, Default)]
 pub struct CounterGame {
     counter: i64,
+    size: GameSize,
+}
+
+impl CounterGame {
+    pub fn new(size: GameSize) -> Self {
+        Self { counter: 0, size }
+    }
 }
 
 impl Game for CounterGame {
@@ -35,10 +42,13 @@ impl Game for CounterGame {
     }
 
     fn status(&self) -> Text<'static> {
-        Text::from(vec![Line::from(vec![
-            "Counter: ".into(),
-            self.counter.to_string().yellow(),
-        ])])
+        Text::from(vec![
+            Line::from(vec!["Counter: ".into(), self.counter.to_string().yellow()]),
+            Line::from(vec![
+                "Size: ".into(),
+                format!("{} x {}", self.size.width, self.size.height).yellow(),
+            ]),
+        ])
     }
 
     fn instructions(&self) -> Vec<Instruction> {
