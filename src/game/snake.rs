@@ -101,6 +101,26 @@ struct SnakeSpawn {
     direction: Direction,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct Food {
+    point: Point,
+    growth: usize,
+    symbol: &'static str,
+    color: Color,
+}
+
+impl Food {
+    /// 创建一个默认食物。
+    fn new(point: Point) -> Self {
+        Self {
+            point,
+            growth: 1,
+            symbol: "*",
+            color: Color::Magenta,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct Snake {
     body: Vec<Point>,
@@ -231,10 +251,10 @@ impl Snake {
         self.direction = direction;
     }
 
-    /// 让蛇吃到一个食物。
-    fn eat_food(&mut self) {
-        self.score += 1;
-        self.pending_growth += 1;
+    /// 让蛇吃到一个食物，并按配置增加分数和长度。
+    fn eat(&mut self, food: Food) {
+        self.score += food.growth;
+        self.pending_growth += food.growth;
     }
 
     /// 将蛇标记为死亡，并清空当前身体。
@@ -260,7 +280,7 @@ impl Snake {
     }
 
     /// 使用新的出生点配置重生。
-    fn respawn(&mut self, spawn: SnakeSpawn) {
+    fn spawn(&mut self, spawn: SnakeSpawn) {
         self.body = spawn.body;
         self.direction = spawn.direction;
         self.score = 0;
@@ -275,7 +295,7 @@ pub struct GameSnake {
     status: GameStatus,
     player: Snake,
     snakes: Vec<Snake>,
-    foods: Vec<Point>,
+    foods: Vec<Food>,
     frame: u8,
 }
 
@@ -287,16 +307,28 @@ impl GameSnake {
                 size,
                 status: GameStatus::WindowTooSmall,
                 player: Snake::new_player(vec![]),
-                snakes: (0..AI_COUNT)
-                    .map(|index| Snake::new_ai(index, vec![]))
-                    .collect(),
+                snakes: vec![],
                 foods: vec![],
                 frame: 0,
             };
         }
+        let mut game = Self {
+            size,
+            status: GameStatus::Running,
+            player: Self::new_player(size),
+            snakes: Self::new_snakes(size),
+            foods: vec![],
+            frame: 0,
+        };
+        game.fill_foods();
+        game
+    }
+
+    /// 创建玩家初始蛇。
+    fn new_player(size: GameSize) -> Snake {
         let center_x = (size.width / 2) as i16;
         let center_y = (size.height / 2) as i16;
-        let player = Snake::new_player(vec![
+        Snake::new_player(vec![
             Point {
                 x: center_x + 1,
                 y: center_y,
@@ -309,23 +341,18 @@ impl GameSnake {
                 x: center_x - 1,
                 y: center_y,
             },
-        ]);
-        let mut game = Self {
-            size,
-            status: GameStatus::Running,
-            player,
-            snakes: (0..AI_COUNT)
-                .map(|index| {
-                    let mut snake = Snake::new_ai(index, vec![]);
-                    snake.respawn(Self::corner_spawn_config(size, index));
-                    snake
-                })
-                .collect(),
-            foods: vec![],
-            frame: 0,
-        };
-        game.fill_foods();
-        game
+        ])
+    }
+
+    /// 创建四个角落出生的 AI 蛇。
+    fn new_snakes(size: GameSize) -> Vec<Snake> {
+        (0..AI_COUNT)
+            .map(|index| {
+                let mut snake = Snake::new_ai(index, vec![]);
+                snake.spawn(Self::corner_spawn_config(size, index));
+                snake
+            })
+            .collect()
     }
 
     /// 返回四个角落使用的固定出生点配置。
@@ -391,21 +418,21 @@ impl GameSnake {
     /// 判断一组出生点是否可以安全放下一条蛇。
     fn can_spawn_body(&self, body: &[Point]) -> bool {
         body.iter().all(|point| {
-            self.is_inside(*point) && !self.is_occupied(*point) && !self.foods.contains(point)
+            self.is_inside(*point)
+                && !self.is_occupied(*point)
+                && !self.foods.iter().any(|food| food.point == *point)
         })
     }
 
     /// 收集当前可以使用的所有出生点配置。
     fn spawn_candidates(&self) -> Vec<SnakeSpawn> {
         let mut candidates = Vec::new();
-
         for index in 0..AI_COUNT {
             let spawn = Self::corner_spawn_config(self.size, index);
             if self.can_spawn_body(&spawn.body) {
                 candidates.push(spawn);
             }
         }
-
         for y in 0..self.size.height as i16 {
             for x in 0..self.size.width as i16 {
                 let head = Point { x, y };
@@ -429,7 +456,6 @@ impl GameSnake {
                 }
             }
         }
-
         candidates
     }
 
@@ -441,7 +467,7 @@ impl GameSnake {
         }
         let mut rng = rand::rng();
         let spawn_index = rng.random_range(0..candidates.len());
-        self.snakes[snake_index].respawn(candidates.into_iter().nth(spawn_index).unwrap());
+        self.snakes[snake_index].spawn(candidates.into_iter().nth(spawn_index).unwrap());
     }
 
     /// 为棋盘补齐缺少的食物数量。
@@ -450,7 +476,7 @@ impl GameSnake {
         for y in 0..self.size.height as i16 {
             for x in 0..self.size.width as i16 {
                 let point = Point { x, y };
-                if self.is_occupied(point) || self.foods.contains(&point) {
+                if self.is_occupied(point) || self.foods.iter().any(|food| food.point == point) {
                     continue;
                 }
                 empty_points.push(point);
@@ -461,7 +487,7 @@ impl GameSnake {
         let food_count = missing_foods.min(empty_points.len());
         for _ in 0..food_count {
             let index = rng.random_range(0..empty_points.len());
-            self.foods.push(empty_points.swap_remove(index));
+            self.foods.push(Food::new(empty_points.swap_remove(index)));
         }
     }
 
@@ -512,7 +538,7 @@ impl GameSnake {
         let Some(target) = self
             .foods
             .iter()
-            .min_by_key(|food| self.snakes[snake_index].head().distance_to(**food))
+            .min_by_key(|food| self.snakes[snake_index].head().distance_to(food.point))
             .copied()
         else {
             return;
@@ -525,14 +551,14 @@ impl GameSnake {
         ];
         directions.sort_by_key(|direction| {
             let next_head = self.snakes[snake_index].head().step(*direction);
-            next_head.distance_to(target)
+            next_head.distance_to(target.point)
         });
         for direction in directions {
             if direction.is_opposite(self.snakes[snake_index].direction) {
                 continue;
             }
             let next_head = self.snakes[snake_index].head().step(direction);
-            let ate_food = self.foods.contains(&next_head);
+            let ate_food = self.foods.iter().any(|food| food.point == next_head);
             let blocked = {
                 let snake = &self.snakes[snake_index];
                 let mut other_snakes = Vec::with_capacity(self.snakes.len());
@@ -555,7 +581,7 @@ impl GameSnake {
     /// 推进玩家蛇的一次移动。
     fn update_player(&mut self) {
         let next_head = self.player.next_head();
-        let food_index = self.foods.iter().position(|food| *food == next_head);
+        let food_index = self.foods.iter().position(|food| food.point == next_head);
         let ate_food = food_index.is_some();
         let other_snakes = self.snakes.iter().collect::<Vec<_>>();
         if self.hits_obstacle(&self.player, &other_snakes, next_head, ate_food) {
@@ -563,8 +589,8 @@ impl GameSnake {
             return;
         }
         if let Some(food_index) = food_index {
-            self.player.eat_food();
-            self.foods.swap_remove(food_index);
+            let food = self.foods.swap_remove(food_index);
+            self.player.eat(food);
         }
         self.player.forward();
         if food_index.is_some() {
@@ -583,7 +609,7 @@ impl GameSnake {
             }
             self.update_ai_direction(snake_index);
             let next_head = self.snakes[snake_index].next_head();
-            let food_index = self.foods.iter().position(|food| *food == next_head);
+            let food_index = self.foods.iter().position(|food| food.point == next_head);
             let ate_food = food_index.is_some();
             let blocked = {
                 let snake = &self.snakes[snake_index];
@@ -601,8 +627,8 @@ impl GameSnake {
                 continue;
             }
             if let Some(food_index) = food_index {
-                self.snakes[snake_index].eat_food();
-                self.foods.swap_remove(food_index);
+                let food = self.foods.swap_remove(food_index);
+                self.snakes[snake_index].eat(food);
             }
             self.snakes[snake_index].forward();
             if food_index.is_some() {
@@ -615,9 +641,9 @@ impl GameSnake {
     fn render_cell(&self, point: Point) -> Span<'static> {
         let mut symbol = ".";
         let mut color = Color::DarkGray;
-        if self.foods.contains(&point) {
-            symbol = "*";
-            color = Color::Magenta;
+        if let Some(food) = self.foods.iter().find(|food| food.point == point) {
+            symbol = food.symbol;
+            color = food.color;
         }
         for snake in &self.snakes {
             if snake.body_contains(point) {
