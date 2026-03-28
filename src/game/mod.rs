@@ -35,6 +35,8 @@ pub struct GameSize {
 
 /// 可嵌入应用外壳中的游戏所需遵循的最小约定。
 pub trait Game: Debug {
+    /// 更新游戏逻辑。
+    fn update(&mut self);
     /// 返回当前游戏内容，用于渲染内容区域。
     fn content(&self) -> Text<'static>;
     /// 返回当前游戏状态，用于渲染状态区域。

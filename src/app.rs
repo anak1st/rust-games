@@ -1,4 +1,6 @@
 use anyhow::Result;
+use std::time::{Duration, Instant};
+
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
     terminal,
@@ -17,6 +19,7 @@ use crate::game::{GAMES, Game, GameKind, GameSize, Instruction, counter::GameCou
 const TITLE_HEIGHT: u16 = 3;
 const FOOTER_HEIGHT: u16 = 3;
 const STATUS_WIDTH: u16 = 24;
+const UPDATE_INTERVAL: Duration = Duration::from_millis(33);
 
 fn current_game_size() -> GameSize {
     let Ok((width, height)) = terminal::size() else {
@@ -109,9 +112,19 @@ impl App {
 
     /// 运行顶层绘制与输入循环，直到用户退出程序。
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+        let mut last_update = Instant::now();
+        terminal.draw(|frame| self.render(frame))?;
         while !self.exit {
-            terminal.draw(|frame| self.draw(frame))?;
-            self.handle_events()?;
+            let timeout = UPDATE_INTERVAL.saturating_sub(last_update.elapsed());
+            let should_render = self.handle_events(timeout)?;
+            let should_update = last_update.elapsed() >= UPDATE_INTERVAL;
+            if should_update {
+                self.update();
+                last_update = Instant::now();
+            }
+            if should_render || should_update {
+                terminal.draw(|frame| self.render(frame))?;
+            }
         }
         Ok(())
     }
@@ -154,16 +167,29 @@ impl App {
         }
     }
 
-    /// 根据当前界面分发绘制逻辑。
-    fn draw(&self, frame: &mut Frame) {
-        match self.screen {
-            Screen::Main => self.draw_main(frame),
-            Screen::Game => self.draw_game(frame),
+    /// 更新应用逻辑。
+    fn update(&mut self) {
+        if self.screen != Screen::Game {
+            return;
+        }
+        if self.game_status != GameStatus::Running {
+            return;
+        }
+        if let Some(game) = self.game.as_mut() {
+            game.update();
         }
     }
 
-    /// 绘制游戏选择界面。
-    fn draw_main(&self, frame: &mut Frame) {
+    /// 根据当前界面分发渲染逻辑。
+    fn render(&self, frame: &mut Frame) {
+        match self.screen {
+            Screen::Main => self.render_main(frame),
+            Screen::Game => self.render_game(frame),
+        }
+    }
+
+    /// 渲染游戏选择界面。
+    fn render_main(&self, frame: &mut Frame) {
         let [title_area, content_area, footer_area] = Layout::vertical([
             Constraint::Length(TITLE_HEIGHT),
             Constraint::Min(0),
@@ -175,8 +201,8 @@ impl App {
         frame.render_widget(self.render_footer(), footer_area);
     }
 
-    /// 绘制当前游戏界面，包括内容区和状态区。
-    fn draw_game(&self, frame: &mut Frame) {
+    /// 渲染当前游戏界面，包括内容区和状态区。
+    fn render_game(&self, frame: &mut Frame) {
         let [title_area, content_area, footer_area] = Layout::vertical([
             Constraint::Length(TITLE_HEIGHT),
             Constraint::Min(0),
@@ -310,17 +336,23 @@ impl App {
     }
 
     /// 读取终端事件，并将支持的按键事件转发给应用。
-    fn handle_events(&mut self) -> Result<()> {
+    fn handle_events(&mut self, timeout: Duration) -> Result<bool> {
+        if !event::poll(timeout)? {
+            return Ok(false);
+        }
         match event::read()? {
             // 这里必须确认事件是按键按下事件，
             // 因为 crossterm 在 Windows 上还会发出按键释放和重复事件。
             Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
-                self.handle_key_event(key_event)
+                self.handle_key_event(key_event);
+                Ok(true)
             }
-            Event::Resize(width, height) => self.handle_resize(width, height),
-            _ => {}
-        };
-        Ok(())
+            Event::Resize(width, height) => {
+                self.handle_resize(width, height);
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
     }
 
     fn handle_resize(&mut self, width: u16, height: u16) {

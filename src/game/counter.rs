@@ -30,6 +30,8 @@ impl GameCounter {
 }
 
 impl Game for GameCounter {
+    fn update(&mut self) {}
+
     fn content(&self) -> Text<'static> {
         Text::from(vec![Line::from(vec![
             "Value: ".into(),
