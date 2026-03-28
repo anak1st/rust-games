@@ -8,27 +8,56 @@ use crossterm::{
 use ratatui::{
     DefaultTerminal, Frame,
     layout::{Constraint, Layout},
-    style::Stylize,
+    style::{Color, Style, Styled, Stylize},
     symbols::border,
     text::{Line, Text},
     widgets::{Block, Clear, Paragraph},
 };
 
-use crate::game::{GAMES, Game, GameKind, GameSize, Instruction, counter::GameCounter};
+use crate::game::{GAMES, Game, GameKind, GameSize, GameStatus, Instruction, counter::GameCounter};
 
 const TITLE_HEIGHT: u16 = 3;
 const FOOTER_HEIGHT: u16 = 3;
 const STATUS_WIDTH: u16 = 24;
 const UPDATE_INTERVAL: Duration = Duration::from_millis(33);
 
-fn current_game_size() -> GameSize {
+fn current_game_size() -> Option<GameSize> {
     let Ok((width, height)) = terminal::size() else {
-        return GameSize::default();
+        return None;
     };
-    GameSize {
-        width: width - STATUS_WIDTH - 2,
-        height: height - TITLE_HEIGHT - FOOTER_HEIGHT - 2,
+    terminal_game_size(width, height)
+}
+
+fn terminal_game_size(width: u16, height: u16) -> Option<GameSize> {
+    let game_width = width - STATUS_WIDTH - 2;
+    let game_height = height - TITLE_HEIGHT - FOOTER_HEIGHT - 2;
+    if game_width <= 0 || game_height <= 0 {
+        return None;
     }
+    Some(GameSize {
+        width: game_width,
+        height: game_height,
+    })
+}
+
+fn status_style(game_status: GameStatus) -> Style {
+    let color = match game_status {
+        GameStatus::Idle => Color::Gray,
+        GameStatus::Main => Color::Cyan,
+        GameStatus::Running => Color::Green,
+        GameStatus::Paused => Color::Yellow,
+        GameStatus::Won => Color::Green,
+        GameStatus::Lost => Color::Red,
+        GameStatus::WindowTooSmall => Color::LightMagenta,
+    };
+    Style::new().fg(color)
+}
+
+fn should_render_popup(game_status: GameStatus) -> bool {
+    matches!(
+        game_status,
+        GameStatus::Paused | GameStatus::Won | GameStatus::Lost | GameStatus::WindowTooSmall
+    )
 }
 
 const MAIN_INSTRUCTIONS: [Instruction; 3] = [
@@ -62,28 +91,6 @@ enum Screen {
     #[default]
     Main,
     Game,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum GameStatus {
-    #[default]
-    Main,
-    Running,
-    Paused,
-    Won,
-    Lost,
-}
-
-impl GameStatus {
-    fn label(self) -> &'static str {
-        match self {
-            GameStatus::Main => "Main",
-            GameStatus::Running => "Running",
-            GameStatus::Paused => "Paused",
-            GameStatus::Won => "Won",
-            GameStatus::Lost => "Lost",
-        }
-    }
 }
 
 #[derive(Debug, Default)]
@@ -147,11 +154,17 @@ impl App {
     fn start_game(&mut self) {
         let game = GAMES[self.game_index];
         let game_size = current_game_size();
+        let size = game_size.unwrap_or_default();
         self.game = Some(match game {
-            GameKind::Counter => Box::new(GameCounter::new(game_size)),
+            GameKind::Counter => Box::new(GameCounter::new(size)),
         });
-        self.game_size = Some(game_size);
-        self.game_status = GameStatus::Running;
+        self.game_size = game_size;
+        self.game_status = if game_size.is_some() {
+            GameStatus::Running
+        } else {
+            GameStatus::WindowTooSmall
+        };
+        self.sync_game_status();
         self.screen = Screen::Game;
     }
 
@@ -177,6 +190,19 @@ impl App {
         }
         if let Some(game) = self.game.as_mut() {
             game.update();
+        }
+        self.sync_game_status();
+    }
+
+    fn sync_game_status(&mut self) {
+        let Some(game) = self.game.as_ref() else {
+            return;
+        };
+        match game.status() {
+            GameStatus::Won | GameStatus::Lost | GameStatus::WindowTooSmall => {
+                self.game_status = game.status();
+            }
+            _ => {}
         }
     }
 
@@ -216,7 +242,7 @@ impl App {
         frame.render_widget(self.render_game_content(), content_area);
         frame.render_widget(self.render_game_status(), status_area);
         frame.render_widget(self.render_footer(), footer_area);
-        if matches!(self.game_status, GameStatus::Paused) {
+        if should_render_popup(self.game_status) {
             let [_, popup_area, _] = Layout::vertical([
                 Constraint::Fill(1),
                 Constraint::Length(7),
@@ -266,7 +292,7 @@ impl App {
         let text = self
             .game
             .as_ref()
-            .map(|game| game.content())
+            .map(|game| game.render_content())
             .unwrap_or_else(|| Text::from("No Game"));
         Paragraph::new(text)
             .centered()
@@ -278,14 +304,13 @@ impl App {
         let mut text = self
             .game
             .as_ref()
-            .map(|game| game.status())
+            .map(|game| game.render_status())
             .unwrap_or_else(|| Text::from("No Status"));
         text.lines.push(Line::from(vec![
-            "Status: ".into(),
-            match self.game_status {
-                GameStatus::Paused => self.game_status.label().yellow(),
-                _ => self.game_status.label().green(),
-            },
+            "状态: ".into(),
+            self.game_status
+                .label()
+                .set_style(status_style(self.game_status)),
         ]));
         Paragraph::new(text).block(Block::bordered().title("Status").border_set(border::THICK))
     }
@@ -315,7 +340,9 @@ impl App {
     }
 
     fn render_game_popup(&self, game_status: GameStatus) -> Paragraph<'static> {
+        let style = status_style(game_status);
         let (title, lines) = match game_status {
+            GameStatus::Idle => unreachable!(),
             GameStatus::Main => unreachable!(),
             GameStatus::Running => unreachable!(),
             GameStatus::Paused => (
@@ -328,11 +355,43 @@ impl App {
                     Line::from("按 Q 返回主界面").centered(),
                 ],
             ),
-            GameStatus::Won => unreachable!(),
-            GameStatus::Lost => unreachable!(),
+            GameStatus::Won => (
+                "胜利",
+                vec![
+                    Line::from("恭喜，游戏胜利").centered(),
+                    Line::from(""),
+                    Line::from("按 R 再来一局").centered(),
+                    Line::from("按 Q 返回主界面").centered(),
+                    Line::from(""),
+                ],
+            ),
+            GameStatus::Lost => (
+                "失败",
+                vec![
+                    Line::from("这局失败了").centered(),
+                    Line::from(""),
+                    Line::from("按 R 重新开始").centered(),
+                    Line::from("按 Q 返回主界面").centered(),
+                    Line::from(""),
+                ],
+            ),
+            GameStatus::WindowTooSmall => (
+                "窗口太小",
+                vec![
+                    Line::from("当前窗口太小，无法正常显示游戏").centered(),
+                    Line::from(""),
+                    Line::from("请放大终端窗口").centered(),
+                    Line::from("调整后会自动重新开始").centered(),
+                    Line::from("按 Q 返回主界面").centered(),
+                ],
+            ),
         };
-        Paragraph::new(Text::from(lines))
-            .block(Block::bordered().title(title).border_set(border::THICK))
+        Paragraph::new(Text::from(lines).style(style)).block(
+            Block::bordered()
+                .title(Line::from(title).set_style(style).bold())
+                .border_set(border::THICK)
+                .border_style(style),
+        )
     }
 
     /// 读取终端事件，并将支持的按键事件转发给应用。
@@ -359,11 +418,8 @@ impl App {
         if self.screen != Screen::Game {
             return;
         }
-        let game_size = GameSize {
-            width: width - STATUS_WIDTH - 2,
-            height: height - TITLE_HEIGHT - FOOTER_HEIGHT - 2,
-        };
-        if self.game_size == Some(game_size) {
+        let game_size = terminal_game_size(width, height);
+        if self.game_size == game_size {
             return;
         }
         self.start_game();

@@ -33,14 +33,42 @@ pub struct GameSize {
     pub height: u16,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GameStatus {
+    #[default]
+    Idle,
+    Main,
+    Running,
+    Paused,
+    Won,
+    Lost,
+    WindowTooSmall,
+}
+
+impl GameStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            GameStatus::Idle => "空闲",
+            GameStatus::Main => "主界面",
+            GameStatus::Running => "进行中",
+            GameStatus::Paused => "已暂停",
+            GameStatus::Won => "已胜利",
+            GameStatus::Lost => "已失败",
+            GameStatus::WindowTooSmall => "窗口太小",
+        }
+    }
+}
+
 /// 可嵌入应用外壳中的游戏所需遵循的最小约定。
 pub trait Game: Debug {
     /// 更新游戏逻辑。
     fn update(&mut self);
+    /// 返回当前游戏状态。
+    fn status(&self) -> GameStatus;
     /// 返回当前游戏内容，用于渲染内容区域。
-    fn content(&self) -> Text<'static>;
-    /// 返回当前游戏状态，用于渲染状态区域。
-    fn status(&self) -> Text<'static>;
+    fn render_content(&self) -> Text<'static>;
+    /// 返回当前游戏状态面板，用于渲染状态区域。
+    fn render_status(&self) -> Text<'static>;
     /// 返回底部区域使用的帮助说明。
     fn instructions(&self) -> Vec<Instruction>;
     /// 处理游戏按键事件并更新内部状态。

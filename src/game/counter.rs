@@ -4,7 +4,7 @@ use ratatui::{
     text::{Line, Text},
 };
 
-use crate::game::{Game, GameSize, Instruction};
+use crate::game::{Game, GameSize, GameStatus, Instruction};
 
 const INSTRUCTIONS: [Instruction; 2] = [
     Instruction {
@@ -21,25 +21,34 @@ const INSTRUCTIONS: [Instruction; 2] = [
 pub struct GameCounter {
     counter: i64,
     size: GameSize,
+    status: GameStatus,
 }
 
 impl GameCounter {
     pub fn new(size: GameSize) -> Self {
-        Self { counter: 0, size }
+        Self {
+            counter: 0,
+            size,
+            status: GameStatus::Running,
+        }
     }
 }
 
 impl Game for GameCounter {
     fn update(&mut self) {}
 
-    fn content(&self) -> Text<'static> {
+    fn status(&self) -> GameStatus {
+        self.status
+    }
+
+    fn render_content(&self) -> Text<'static> {
         Text::from(vec![Line::from(vec![
             "Value: ".into(),
             self.counter.to_string().yellow(),
         ])])
     }
 
-    fn status(&self) -> Text<'static> {
+    fn render_status(&self) -> Text<'static> {
         Text::from(vec![
             Line::from(vec!["Counter: ".into(), self.counter.to_string().yellow()]),
             Line::from(vec![
