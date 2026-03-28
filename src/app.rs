@@ -14,7 +14,10 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph},
 };
 
-use crate::game::{GAMES, Game, GameKind, GameSize, GameStatus, Instruction, counter::GameCounter};
+use crate::game::{
+    GAMES, Game, GameKind, GameSize, GameStatus, Instruction, counter::GameCounter,
+    snake::GameSnake,
+};
 
 const TITLE_HEIGHT: u16 = 3;
 const FOOTER_HEIGHT: u16 = 3;
@@ -25,39 +28,17 @@ fn current_game_size() -> Option<GameSize> {
     let Ok((width, height)) = terminal::size() else {
         return None;
     };
-    terminal_game_size(width, height)
+    calculate_game_size(width, height)
 }
 
-fn terminal_game_size(width: u16, height: u16) -> Option<GameSize> {
-    let game_width = width - STATUS_WIDTH - 2;
-    let game_height = height - TITLE_HEIGHT - FOOTER_HEIGHT - 2;
-    if game_width <= 0 || game_height <= 0 {
+fn calculate_game_size(width: u16, height: u16) -> Option<GameSize> {
+    if width <= STATUS_WIDTH + 2 || height <= TITLE_HEIGHT + FOOTER_HEIGHT + 2 {
         return None;
     }
     Some(GameSize {
-        width: game_width,
-        height: game_height,
+        width: width - STATUS_WIDTH - 2,
+        height: height - TITLE_HEIGHT - FOOTER_HEIGHT - 2,
     })
-}
-
-fn status_style(game_status: GameStatus) -> Style {
-    let color = match game_status {
-        GameStatus::Idle => Color::Gray,
-        GameStatus::Main => Color::Cyan,
-        GameStatus::Running => Color::Green,
-        GameStatus::Paused => Color::Yellow,
-        GameStatus::Won => Color::Green,
-        GameStatus::Lost => Color::Red,
-        GameStatus::WindowTooSmall => Color::LightMagenta,
-    };
-    Style::new().fg(color)
-}
-
-fn should_render_popup(game_status: GameStatus) -> bool {
-    matches!(
-        game_status,
-        GameStatus::Paused | GameStatus::Won | GameStatus::Lost | GameStatus::WindowTooSmall
-    )
 }
 
 const MAIN_INSTRUCTIONS: [Instruction; 3] = [
@@ -157,6 +138,7 @@ impl App {
         let size = game_size.unwrap_or_default();
         self.game = Some(match game {
             GameKind::Counter => Box::new(GameCounter::new(size)),
+            GameKind::Snake => Box::new(GameSnake::new(size)),
         });
         self.game_size = game_size;
         self.game_status = if game_size.is_some() {
@@ -242,7 +224,10 @@ impl App {
         frame.render_widget(self.render_game_content(), content_area);
         frame.render_widget(self.render_game_status(), status_area);
         frame.render_widget(self.render_footer(), footer_area);
-        if should_render_popup(self.game_status) {
+        if matches!(
+            self.game_status,
+            GameStatus::Paused | GameStatus::Won | GameStatus::Lost | GameStatus::WindowTooSmall
+        ) {
             let [_, popup_area, _] = Layout::vertical([
                 Constraint::Fill(1),
                 Constraint::Length(7),
@@ -308,9 +293,7 @@ impl App {
             .unwrap_or_else(|| Text::from("No Status"));
         text.lines.push(Line::from(vec![
             "状态: ".into(),
-            self.game_status
-                .label()
-                .set_style(status_style(self.game_status)),
+            self.game_status.label().set_style(self.game_status.color()),
         ]));
         Paragraph::new(text).block(Block::bordered().title("Status").border_set(border::THICK))
     }
@@ -340,7 +323,6 @@ impl App {
     }
 
     fn render_game_popup(&self, game_status: GameStatus) -> Paragraph<'static> {
-        let style = status_style(game_status);
         let (title, lines) = match game_status {
             GameStatus::Idle => unreachable!(),
             GameStatus::Main => unreachable!(),
@@ -386,11 +368,11 @@ impl App {
                 ],
             ),
         };
-        Paragraph::new(Text::from(lines).style(style)).block(
+        Paragraph::new(Text::from(lines).centered()).block(
             Block::bordered()
-                .title(Line::from(title).set_style(style).bold())
+                .title(Line::from(title).set_style(game_status.color()).bold())
                 .border_set(border::THICK)
-                .border_style(style),
+                .border_style(game_status.color()),
         )
     }
 
@@ -418,7 +400,7 @@ impl App {
         if self.screen != Screen::Game {
             return;
         }
-        let game_size = terminal_game_size(width, height);
+        let game_size = calculate_game_size(width, height);
         if self.game_size == game_size {
             return;
         }

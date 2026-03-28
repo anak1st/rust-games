@@ -1,25 +1,28 @@
 pub mod counter;
+pub mod snake;
 
 use std::fmt::Debug;
 
 use clap::ValueEnum;
 use crossterm::event::KeyEvent;
-use ratatui::text::Text;
+use ratatui::{style::Color, text::Text};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum GameKind {
     Counter,
+    Snake,
 }
 
 impl GameKind {
     pub fn name(self) -> &'static str {
         match self {
             GameKind::Counter => "计数器",
+            GameKind::Snake => "贪吃蛇",
         }
     }
 }
 
-pub const GAMES: [GameKind; 1] = [GameKind::Counter];
+pub const GAMES: [GameKind; 2] = [GameKind::Counter, GameKind::Snake];
 
 #[derive(Debug, Clone, Copy)]
 pub struct Instruction {
@@ -55,6 +58,18 @@ impl GameStatus {
             GameStatus::Won => "已胜利",
             GameStatus::Lost => "已失败",
             GameStatus::WindowTooSmall => "窗口太小",
+        }
+    }
+
+    pub fn color(self) -> Color {
+        match self {
+            GameStatus::Idle => Color::Gray,
+            GameStatus::Main => Color::Cyan,
+            GameStatus::Running => Color::Green,
+            GameStatus::Paused => Color::Yellow,
+            GameStatus::Won => Color::Green,
+            GameStatus::Lost => Color::Red,
+            GameStatus::WindowTooSmall => Color::LightMagenta,
         }
     }
 }
