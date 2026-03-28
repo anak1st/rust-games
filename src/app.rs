@@ -12,11 +12,21 @@ use ratatui::{
     widgets::{Block, Clear, Paragraph},
 };
 
-use crate::game::{GAMES, Game, GameKind, GameSize, Instruction, counter::CounterGame};
+use crate::game::{GAMES, Game, GameKind, GameSize, Instruction, counter::GameCounter};
 
 const TITLE_HEIGHT: u16 = 3;
 const FOOTER_HEIGHT: u16 = 3;
 const STATUS_WIDTH: u16 = 24;
+
+fn current_game_size() -> GameSize {
+    let Ok((width, height)) = terminal::size() else {
+        return GameSize::default();
+    };
+    GameSize {
+        width: width - STATUS_WIDTH - 2,
+        height: height - TITLE_HEIGHT - FOOTER_HEIGHT - 2,
+    }
+}
 
 const MAIN_INSTRUCTIONS: [Instruction; 3] = [
     Instruction {
@@ -123,9 +133,9 @@ impl App {
     /// 打开所选游戏，并重置应用层的游戏状态。
     fn start_game(&mut self) {
         let game = GAMES[self.game_index];
-        let game_size = Self::current_game_size();
+        let game_size = current_game_size();
         self.game = Some(match game {
-            GameKind::Counter => Box::new(CounterGame::new(game_size)),
+            GameKind::Counter => Box::new(GameCounter::new(game_size)),
         });
         self.game_size = Some(game_size);
         self.game_status = GameStatus::Running;
@@ -198,25 +208,11 @@ impl App {
         }
     }
 
-    fn current_game_size() -> GameSize {
-        let Ok((width, height)) = terminal::size() else {
-            return GameSize::default();
-        };
-        GameSize {
-            width: width - STATUS_WIDTH - 2,
-            height: height - TITLE_HEIGHT - FOOTER_HEIGHT - 2,
-        }
-    }
-
     /// 渲染当前界面的标题区域。
     fn render_title(&self) -> Paragraph<'static> {
         let title = match self.screen {
             Screen::Main => "选择游戏".to_string(),
-            Screen::Game => self
-                .game
-                .as_ref()
-                .map(|game| game.title())
-                .unwrap_or_else(|| "Unknown Game".to_string()),
+            Screen::Game => GAMES[self.game_index].name().to_string(),
         };
         Paragraph::new(title.bold())
             .centered()
@@ -227,9 +223,7 @@ impl App {
     fn render_main_content(&self) -> Paragraph<'static> {
         let mut lines = vec![];
         lines.extend(GAMES.iter().enumerate().map(|(index, game)| {
-            let game_name = match game {
-                GameKind::Counter => "Counter Demo",
-            };
+            let game_name = game.name();
             if index == self.game_index {
                 Line::from(format!("> {game_name}")).yellow()
             } else {

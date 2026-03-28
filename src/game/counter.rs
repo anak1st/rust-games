@@ -18,22 +18,18 @@ const INSTRUCTIONS: [Instruction; 2] = [
 ];
 
 #[derive(Debug, Default)]
-pub struct CounterGame {
+pub struct GameCounter {
     counter: i64,
     size: GameSize,
 }
 
-impl CounterGame {
+impl GameCounter {
     pub fn new(size: GameSize) -> Self {
         Self { counter: 0, size }
     }
 }
 
-impl Game for CounterGame {
-    fn title(&self) -> String {
-        "Counter Demo".to_string()
-    }
-
+impl Game for GameCounter {
     fn content(&self) -> Text<'static> {
         Text::from(vec![Line::from(vec![
             "Value: ".into(),

@@ -11,6 +11,14 @@ pub enum GameKind {
     Counter,
 }
 
+impl GameKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            GameKind::Counter => "计数器",
+        }
+    }
+}
+
 pub const GAMES: [GameKind; 1] = [GameKind::Counter];
 
 #[derive(Debug, Clone, Copy)]
@@ -27,8 +35,6 @@ pub struct GameSize {
 
 /// 可嵌入应用外壳中的游戏所需遵循的最小约定。
 pub trait Game: Debug {
-    /// 返回显示在应用标题栏中的标题。
-    fn title(&self) -> String;
     /// 返回当前游戏内容，用于渲染内容区域。
     fn content(&self) -> Text<'static>;
     /// 返回当前游戏状态，用于渲染状态区域。
