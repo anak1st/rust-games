@@ -7,10 +7,16 @@ use ratatui::{
 
 use crate::game::{Direction, Game, GameSize, GameStatus, Instruction, Point};
 
-const INSTRUCTIONS: [Instruction; 1] = [Instruction {
-    label: " 转向 ",
-    key: "<Arrows/WASD>",
-}];
+const INSTRUCTIONS: [Instruction; 2] = [
+    Instruction {
+        label: " 转向 ",
+        key: "<Arrows/WASD>",
+    },
+    Instruction {
+        label: " 切换控制 ",
+        key: "<I>",
+    },
+];
 
 const MIN_WIDTH: u16 = 12;
 const MIN_HEIGHT: u16 = 8;
@@ -18,6 +24,42 @@ const FRAMES_PER_STEP: u8 = 4;
 const FOOD_COUNT: usize = 3;
 const AI_COUNT: usize = 4;
 const DEAD_WAIT_STEPS: u8 = 10;
+const AI_ROAM_CHANCE_PERCENT: u8 = 5;
+const AI_ROAM_STEPS: u8 = 4;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SnakeController {
+    Manual,
+    Ai(AiState),
+}
+
+impl SnakeController {
+    /// 返回控制模式在界面中展示的文案。
+    fn label(self) -> &'static str {
+        match self {
+            SnakeController::Manual => "手动",
+            SnakeController::Ai(_) => "AI",
+        }
+    }
+
+    /// 返回该控制模式是否接受玩家输入。
+    fn accepts_manual_input(self) -> bool {
+        matches!(self, SnakeController::Manual)
+    }
+
+    /// 在手动和 AI 控制之间切换。
+    fn toggled(self) -> SnakeController {
+        match self {
+            SnakeController::Manual => SnakeController::Ai(AiState::default()),
+            SnakeController::Ai(_) => SnakeController::Manual,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct AiState {
+    roaming_steps: u8,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SnakeState {
@@ -55,6 +97,7 @@ impl Food {
 struct Snake {
     body: Vec<Point>,
     direction: Direction,
+    controller: SnakeController,
     head_symbol: &'static str,
     body_symbol: &'static str,
     head_color: Color,
@@ -66,10 +109,11 @@ struct Snake {
 
 impl Snake {
     /// 创建玩家控制的蛇实例。
-    fn new_player(body: Vec<Point>) -> Self {
+    fn new_player(body: Vec<Point>, controller: SnakeController) -> Self {
         Self {
             body,
             direction: Direction::Right,
+            controller,
             head_symbol: "@",
             body_symbol: "o",
             head_color: Color::White,
@@ -106,6 +150,7 @@ impl Snake {
         Self {
             body,
             direction: Direction::Left,
+            controller: SnakeController::Ai(AiState::default()),
             head_symbol,
             body_symbol,
             head_color,
@@ -181,6 +226,11 @@ impl Snake {
         self.direction = direction;
     }
 
+    /// 返回蛇当前的控制模式。
+    fn controller(&self) -> SnakeController {
+        self.controller
+    }
+
     /// 让蛇吃到一个食物，并按配置增加分数和长度。
     fn eat(&mut self, food: Food) {
         self.score += food.growth;
@@ -216,7 +266,16 @@ impl Snake {
         self.score = 0;
         self.pending_growth = 0;
         self.state = SnakeState::Alive;
+        if let SnakeController::Ai(state) = &mut self.controller {
+            *state = AiState::default();
+        }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum SnakeSlot {
+    Player,
+    Enemy(usize),
 }
 
 #[derive(Debug)]
@@ -236,7 +295,7 @@ impl GameSnake {
             return Self {
                 size,
                 status: GameStatus::WindowTooSmall,
-                player: Snake::new_player(vec![]),
+                player: Snake::new_player(vec![], SnakeController::Manual),
                 snakes: vec![],
                 foods: vec![],
                 frame: 0,
@@ -245,52 +304,95 @@ impl GameSnake {
         let mut game = Self {
             size,
             status: GameStatus::Running,
-            player: Self::new_player(size),
-            snakes: Self::new_snakes(size),
+            player: Self::spawn_player(size),
+            snakes: vec![],
             foods: vec![],
             frame: 0,
         };
-        game.fill_foods();
+        for index in 0..AI_COUNT {
+            game.snakes.push(Snake::new_ai(index, vec![]));
+            if !game.spawn_snake(index) {
+                game.snakes[index].mark_dead();
+            }
+        }
+        while game.foods.len() < FOOD_COUNT {
+            game.spawn_food();
+        }
         game
     }
 
+    /// helper
+
+    /// 判断给定位置是否被任意一条蛇占用。
+    fn is_occupied(&self, point: Point) -> bool {
+        self.player.contains(point) || self.snakes.iter().any(|snake| snake.contains(point))
+    }
+
+    /// 判断位置是否在棋盘内。
+    fn is_inside(&self, point: Point) -> bool {
+        point.x >= 0
+            && point.y >= 0
+            && point.x < self.size.width as i16
+            && point.y < self.size.height as i16
+    }
+
+    /// 判断一组位置是否可以安全放下一条蛇。
+    fn is_valid_points(&self, points: &[Point]) -> bool {
+        points.iter().all(|point| {
+            self.is_inside(*point)
+                && !self.is_occupied(*point)
+                && !self.foods.iter().any(|food| food.point == *point)
+        })
+    }
+
+    /// 返回指定槽位对应的蛇实例。
+    fn snake(&self, slot: SnakeSlot) -> &Snake {
+        match slot {
+            SnakeSlot::Player => &self.player,
+            SnakeSlot::Enemy(index) => &self.snakes[index],
+        }
+    }
+
+    /// 返回指定槽位对应的可变蛇实例。
+    fn snake_mut(&mut self, slot: SnakeSlot) -> &mut Snake {
+        match slot {
+            SnakeSlot::Player => &mut self.player,
+            SnakeSlot::Enemy(index) => &mut self.snakes[index],
+        }
+    }
+
+    // spawn
+
     /// 创建玩家初始蛇。
-    fn new_player(size: GameSize) -> Snake {
+    fn spawn_player(size: GameSize) -> Snake {
         let center_x = (size.width / 2) as i16;
         let center_y = (size.height / 2) as i16;
-        Snake::new_player(vec![
-            Point {
-                x: center_x + 1,
-                y: center_y,
-            },
-            Point {
-                x: center_x,
-                y: center_y,
-            },
-            Point {
-                x: center_x - 1,
-                y: center_y,
-            },
-        ])
+        Snake::new_player(
+            vec![
+                Point {
+                    x: center_x + 1,
+                    y: center_y,
+                },
+                Point {
+                    x: center_x,
+                    y: center_y,
+                },
+                Point {
+                    x: center_x - 1,
+                    y: center_y,
+                },
+            ],
+            SnakeController::Manual,
+        )
     }
 
-    /// 创建四个角落出生的 AI 蛇。
-    fn new_snakes(size: GameSize) -> Vec<Snake> {
-        (0..AI_COUNT)
-            .map(|index| {
-                let mut snake = Snake::new_ai(index, vec![]);
-                snake.spawn(Self::corner_spawn_config(size, index));
-                snake
-            })
-            .collect()
-    }
-
-    /// 返回四个角落使用的固定出生点配置。
-    fn corner_spawn_config(size: GameSize, index: usize) -> SnakeSpawn {
-        let right = size.width as i16 - 1;
-        let bottom = size.height as i16 - 1;
-        match index {
-            0 => SnakeSpawn {
+    /// 为一条 AI 蛇随机选择出生位置。
+    fn spawn_snake(&mut self, snake_index: usize) -> bool {
+        let right = self.size.width as i16 - 1;
+        let bottom = self.size.height as i16 - 1;
+        let mut corner_candidates = Vec::new();
+        for spawn in [
+            SnakeSpawn {
                 body: vec![
                     Point { x: 0, y: 0 },
                     Point { x: 0, y: 1 },
@@ -298,7 +400,15 @@ impl GameSnake {
                 ],
                 direction: Direction::Right,
             },
-            1 => SnakeSpawn {
+            SnakeSpawn {
+                body: vec![
+                    Point { x: 0, y: 0 },
+                    Point { x: 1, y: 0 },
+                    Point { x: 2, y: 0 },
+                ],
+                direction: Direction::Down,
+            },
+            SnakeSpawn {
                 body: vec![
                     Point { x: right, y: 0 },
                     Point { x: right, y: 1 },
@@ -306,7 +416,15 @@ impl GameSnake {
                 ],
                 direction: Direction::Left,
             },
-            2 => SnakeSpawn {
+            SnakeSpawn {
+                body: vec![
+                    Point { x: right, y: 0 },
+                    Point { x: right - 1, y: 0 },
+                    Point { x: right - 2, y: 0 },
+                ],
+                direction: Direction::Down,
+            },
+            SnakeSpawn {
                 body: vec![
                     Point { x: 0, y: bottom },
                     Point {
@@ -320,7 +438,15 @@ impl GameSnake {
                 ],
                 direction: Direction::Right,
             },
-            _ => SnakeSpawn {
+            SnakeSpawn {
+                body: vec![
+                    Point { x: 0, y: bottom },
+                    Point { x: 1, y: bottom },
+                    Point { x: 2, y: bottom },
+                ],
+                direction: Direction::Up,
+            },
+            SnakeSpawn {
                 body: vec![
                     Point {
                         x: right,
@@ -337,32 +463,36 @@ impl GameSnake {
                 ],
                 direction: Direction::Left,
             },
-        }
-    }
-
-    /// 判断给定位置是否被任意一条蛇占用。
-    fn is_occupied(&self, point: Point) -> bool {
-        self.player.contains(point) || self.snakes.iter().any(|snake| snake.contains(point))
-    }
-
-    /// 判断一组出生点是否可以安全放下一条蛇。
-    fn can_spawn_body(&self, body: &[Point]) -> bool {
-        body.iter().all(|point| {
-            self.is_inside(*point)
-                && !self.is_occupied(*point)
-                && !self.foods.iter().any(|food| food.point == *point)
-        })
-    }
-
-    /// 收集当前可以使用的所有出生点配置。
-    fn spawn_candidates(&self) -> Vec<SnakeSpawn> {
-        let mut candidates = Vec::new();
-        for index in 0..AI_COUNT {
-            let spawn = Self::corner_spawn_config(self.size, index);
-            if self.can_spawn_body(&spawn.body) {
-                candidates.push(spawn);
+            SnakeSpawn {
+                body: vec![
+                    Point {
+                        x: right,
+                        y: bottom,
+                    },
+                    Point {
+                        x: right - 1,
+                        y: bottom,
+                    },
+                    Point {
+                        x: right - 2,
+                        y: bottom,
+                    },
+                ],
+                direction: Direction::Up,
+            },
+        ] {
+            if self.is_valid_points(&spawn.body) {
+                corner_candidates.push(spawn);
             }
         }
+        if !corner_candidates.is_empty() {
+            let mut rng = rand::rng();
+            let spawn_index = rng.random_range(0..corner_candidates.len());
+            self.snakes[snake_index].spawn(corner_candidates.swap_remove(spawn_index));
+            return true;
+        }
+
+        let mut candidates = Vec::new();
         for y in 0..self.size.height as i16 {
             for x in 0..self.size.width as i16 {
                 let head = Point { x, y };
@@ -379,29 +509,27 @@ impl GameSnake {
                         current = current.step(direction.opposite());
                         body.push(current);
                     }
-                    if !self.can_spawn_body(&body) {
+                    if !self.is_valid_points(&body) {
                         continue;
                     }
                     candidates.push(SnakeSpawn { body, direction });
                 }
             }
         }
-        candidates
-    }
-
-    /// 为一条死亡的 AI 蛇随机选择重生位置。
-    fn respawn_snake(&mut self, snake_index: usize) {
-        let candidates = self.spawn_candidates();
         if candidates.is_empty() {
-            return;
+            return false;
         }
         let mut rng = rand::rng();
         let spawn_index = rng.random_range(0..candidates.len());
-        self.snakes[snake_index].spawn(candidates.into_iter().nth(spawn_index).unwrap());
+        self.snakes[snake_index].spawn(candidates.swap_remove(spawn_index));
+        true
     }
 
-    /// 为棋盘补齐缺少的食物数量。
-    fn fill_foods(&mut self) {
+    /// 在任意空位上随机生成一个食物。
+    fn spawn_food(&mut self) {
+        if self.foods.len() >= FOOD_COUNT {
+            return;
+        }
         let mut empty_points = Vec::new();
         for y in 0..self.size.height as i16 {
             for x in 0..self.size.width as i16 {
@@ -412,22 +540,15 @@ impl GameSnake {
                 empty_points.push(point);
             }
         }
-        let mut rng = rand::rng();
-        let missing_foods = FOOD_COUNT.saturating_sub(self.foods.len());
-        let food_count = missing_foods.min(empty_points.len());
-        for _ in 0..food_count {
-            let index = rng.random_range(0..empty_points.len());
-            self.foods.push(Food::new(empty_points.swap_remove(index)));
+        if empty_points.is_empty() {
+            return;
         }
+        let mut rng = rand::rng();
+        let index = rng.random_range(0..empty_points.len());
+        self.foods.push(Food::new(empty_points.swap_remove(index)));
     }
 
-    /// 判断位置是否在棋盘内。
-    fn is_inside(&self, point: Point) -> bool {
-        point.x >= 0
-            && point.y >= 0
-            && point.x < self.size.width as i16
-            && point.y < self.size.height as i16
-    }
+    // update
 
     /// 判断一条蛇移动到目标位置后是否会失败。
     ///
@@ -460,36 +581,101 @@ impl GameSnake {
         false
     }
 
-    /// 为指定 AI 蛇选择下一步移动方向。
-    fn update_ai_direction(&mut self, snake_index: usize) {
-        if !self.snakes[snake_index].is_alive() {
-            return;
-        }
-        let Some(target) = self
-            .foods
-            .iter()
-            .min_by_key(|food| self.snakes[snake_index].head().distance_to(food.point))
-            .copied()
-        else {
-            return;
-        };
+    /// 收集给定蛇下一步可安全移动的方向。
+    fn get_snake_safe_directions(&self, slot: SnakeSlot) -> Vec<Direction> {
+        let snake = self.snake(slot);
         let mut directions = vec![
             Direction::Up,
             Direction::Down,
             Direction::Left,
             Direction::Right,
         ];
-        directions.sort_by_key(|direction| {
-            let next_head = self.snakes[snake_index].head().step(*direction);
-            next_head.distance_to(target.point)
-        });
-        for direction in directions {
-            if direction.is_opposite(self.snakes[snake_index].direction) {
-                continue;
+        directions.retain(|direction| {
+            if direction.is_opposite(snake.direction) {
+                return false;
             }
-            let next_head = self.snakes[snake_index].head().step(direction);
+            let next_head = snake.head().step(*direction);
             let ate_food = self.foods.iter().any(|food| food.point == next_head);
-            let blocked = {
+            let blocked = match slot {
+                SnakeSlot::Player => {
+                    let other_snakes = self.snakes.iter().collect::<Vec<_>>();
+                    self.hits_obstacle(snake, &other_snakes, next_head, ate_food)
+                }
+                SnakeSlot::Enemy(snake_index) => {
+                    let mut other_snakes = Vec::with_capacity(self.snakes.len());
+                    other_snakes.push(&self.player);
+                    for (index, other_snake) in self.snakes.iter().enumerate() {
+                        if index != snake_index {
+                            other_snakes.push(other_snake);
+                        }
+                    }
+                    self.hits_obstacle(snake, &other_snakes, next_head, ate_food)
+                }
+            };
+            !blocked
+        });
+        directions
+    }
+
+    /// 按控制模式更新指定蛇的方向。
+    fn update_snake_direction(&mut self, slot: SnakeSlot) {
+        let snake = self.snake(slot);
+        let head = snake.head();
+        let mut ai_state = match snake.controller {
+            SnakeController::Ai(ai_state) => ai_state,
+            SnakeController::Manual => return,
+        };
+        let mut directions = self.get_snake_safe_directions(slot);
+        let mut next_direction = None;
+
+        if !directions.is_empty() {
+            let mut rng = rand::rng();
+            if ai_state.roaming_steps == 0
+                && rng.random_range(0..100usize) < AI_ROAM_CHANCE_PERCENT as usize
+            {
+                ai_state.roaming_steps = AI_ROAM_STEPS;
+            }
+
+            if ai_state.roaming_steps > 0 {
+                ai_state.roaming_steps -= 1;
+                let index = rng.random_range(0..directions.len());
+                next_direction = Some(directions.swap_remove(index));
+            } else if let Some(target) = self
+                .foods
+                .iter()
+                .min_by_key(|food| head.distance_to(food.point))
+                .copied()
+            {
+                directions.sort_by_key(|direction| {
+                    let next_head = head.step(*direction);
+                    next_head.distance_to(target.point)
+                });
+                next_direction = directions.into_iter().next();
+            } else {
+                next_direction = Some(directions.swap_remove(0));
+            }
+        }
+
+        let snake = self.snake_mut(slot);
+        if let SnakeController::Ai(state) = &mut snake.controller {
+            *state = ai_state;
+        }
+        if let Some(direction) = next_direction {
+            snake.set_direction(direction);
+        }
+    }
+
+    /// 推进指定蛇的一次移动，并返回是否在碰撞中死亡。
+    fn advance_snake(&mut self, slot: SnakeSlot) -> bool {
+        let next_head = self.snake(slot).next_head();
+        let food_index = self.foods.iter().position(|food| food.point == next_head);
+        let ate_food = food_index.is_some();
+        let blocked = match slot {
+            SnakeSlot::Player => {
+                let other_snakes = self.snakes.iter().collect::<Vec<_>>();
+                self.hits_obstacle(&self.player, &other_snakes, next_head, ate_food)
+            }
+            SnakeSlot::Enemy(snake_index) => {
                 let snake = &self.snakes[snake_index];
                 let mut other_snakes = Vec::with_capacity(self.snakes.len());
                 other_snakes.push(&self.player);
@@ -499,73 +685,45 @@ impl GameSnake {
                     }
                 }
                 self.hits_obstacle(snake, &other_snakes, next_head, ate_food)
-            };
-            if blocked {
-                continue;
             }
-            self.snakes[snake_index].set_direction(direction);
-            return;
+        };
+        if blocked {
+            return true;
         }
+        if let Some(food_index) = food_index {
+            let food = self.foods.swap_remove(food_index);
+            self.snake_mut(slot).eat(food);
+        }
+        self.snake_mut(slot).forward();
+        false
     }
 
     /// 推进玩家蛇的一次移动。
     fn update_player(&mut self) {
-        let next_head = self.player.next_head();
-        let food_index = self.foods.iter().position(|food| food.point == next_head);
-        let ate_food = food_index.is_some();
-        let other_snakes = self.snakes.iter().collect::<Vec<_>>();
-        if self.hits_obstacle(&self.player, &other_snakes, next_head, ate_food) {
+        self.update_snake_direction(SnakeSlot::Player);
+        if self.advance_snake(SnakeSlot::Player) {
             self.status = GameStatus::Lost;
-            return;
-        }
-        if let Some(food_index) = food_index {
-            let food = self.foods.swap_remove(food_index);
-            self.player.eat(food);
-        }
-        self.player.forward();
-        if food_index.is_some() {
-            self.fill_foods();
         }
     }
 
     /// 推进所有 AI 蛇的一次移动。
     fn update_snakes(&mut self) {
         for snake_index in 0..self.snakes.len() {
+            let slot = SnakeSlot::Enemy(snake_index);
             if !self.snakes[snake_index].is_alive() {
                 if self.snakes[snake_index].tick_dead() {
-                    self.respawn_snake(snake_index);
+                    self.spawn_snake(snake_index);
                 }
                 continue;
             }
-            self.update_ai_direction(snake_index);
-            let next_head = self.snakes[snake_index].next_head();
-            let food_index = self.foods.iter().position(|food| food.point == next_head);
-            let ate_food = food_index.is_some();
-            let blocked = {
-                let snake = &self.snakes[snake_index];
-                let mut other_snakes = Vec::with_capacity(self.snakes.len());
-                other_snakes.push(&self.player);
-                for (index, other_snake) in self.snakes.iter().enumerate() {
-                    if index != snake_index {
-                        other_snakes.push(other_snake);
-                    }
-                }
-                self.hits_obstacle(snake, &other_snakes, next_head, ate_food)
-            };
-            if blocked {
+            self.update_snake_direction(slot);
+            if self.advance_snake(slot) {
                 self.snakes[snake_index].mark_dead();
-                continue;
-            }
-            if let Some(food_index) = food_index {
-                let food = self.foods.swap_remove(food_index);
-                self.snakes[snake_index].eat(food);
-            }
-            self.snakes[snake_index].forward();
-            if food_index.is_some() {
-                self.fill_foods();
             }
         }
     }
+
+    // render
 
     /// 渲染一个棋盘格子。
     fn render_cell(&self, point: Point) -> Span<'static> {
@@ -614,6 +772,7 @@ impl Game for GameSnake {
         self.frame = 0;
         self.update_snakes();
         self.update_player();
+        self.spawn_food();
     }
 
     /// 返回贪吃蛇游戏当前状态。
@@ -640,6 +799,10 @@ impl Game for GameSnake {
     /// 渲染贪吃蛇游戏的状态区域。
     fn render_status(&self) -> Text<'static> {
         Text::from(vec![
+            Line::from(vec![
+                "玩家控制: ".into(),
+                self.player.controller().label().fg(self.player.head_color),
+            ]),
             Line::from(vec![
                 "玩家方向: ".into(),
                 self.player.direction.label().fg(self.player.head_color),
@@ -687,6 +850,10 @@ impl Game for GameSnake {
 
     /// 处理贪吃蛇游戏的方向输入。
     fn handle_key_event(&mut self, key_event: KeyEvent) {
+        if matches!(key_event.code, KeyCode::Char('i') | KeyCode::Char('I')) {
+            self.player.controller = self.player.controller.toggled();
+            return;
+        }
         let next_direction = match key_event.code {
             KeyCode::Up | KeyCode::Char('w') => Some(Direction::Up),
             KeyCode::Down | KeyCode::Char('s') => Some(Direction::Down),
@@ -697,6 +864,9 @@ impl Game for GameSnake {
         let Some(next_direction) = next_direction else {
             return;
         };
+        if !self.player.controller().accepts_manual_input() {
+            return;
+        }
         if next_direction.is_opposite(self.player.direction) {
             return;
         }
