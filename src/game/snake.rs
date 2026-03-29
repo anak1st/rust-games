@@ -176,6 +176,11 @@ impl Snake {
         self.score
     }
 
+    /// 返回蛇当前的控制模式。
+    fn controller(&self) -> SnakeController {
+        self.controller
+    }
+
     /// 返回蛇当前是否仍然存活。
     fn is_alive(&self) -> bool {
         self.state == SnakeState::Alive
@@ -210,8 +215,14 @@ impl Snake {
         }
     }
 
+    /// 更新蛇当前的移动方向。
+    fn set_direction(&mut self, direction: Direction) {
+        self.direction = direction;
+    }
+
     /// 让蛇沿当前方向前进一步。
-    fn forward(&mut self) {
+    fn advance(&mut self) {
+        self.advance_roaming();
         let next_head = self.next_head();
         self.body.insert(0, next_head);
         if self.pending_growth > 0 {
@@ -221,14 +232,30 @@ impl Snake {
         }
     }
 
-    /// 更新蛇当前的移动方向。
-    fn set_direction(&mut self, direction: Direction) {
-        self.direction = direction;
+    /// 返回 AI 蛇当前是否仍处于漫游状态。
+    fn is_roaming(&self) -> bool {
+        match self.controller {
+            SnakeController::Ai(state) => state.roaming_steps > 0,
+            SnakeController::Manual => false,
+        }
     }
 
-    /// 返回蛇当前的控制模式。
-    fn controller(&self) -> SnakeController {
-        self.controller
+    /// 让 AI 蛇进入一段固定步数的漫游状态。
+    fn start_roaming(&mut self, steps: u8) {
+        if let SnakeController::Ai(state) = &mut self.controller {
+            if state.roaming_steps == 0 {
+                state.roaming_steps = steps;
+            }
+        }
+    }
+
+    /// 消耗一次漫游步数。
+    fn advance_roaming(&mut self) {
+        if let SnakeController::Ai(state) = &mut self.controller {
+            if state.roaming_steps > 0 {
+                state.roaming_steps -= 1;
+            }
+        }
     }
 
     /// 让蛇吃到一个食物，并按配置增加分数和长度。
@@ -618,51 +645,63 @@ impl GameSnake {
     }
 
     /// 按控制模式更新指定蛇的方向。
+    ///
+    /// 步骤：
+    /// 1. 如果是手动控制，直接跳过。
+    /// 2. 如果是 AI 控制，先更新漫游状态。
+    /// 3. 计算当前所有安全方向。
+    /// 4. 漫游时保持当前方向，只有遇到危险才改走其他安全方向。
+    /// 5. 将最终方向写回蛇实例。
     fn update_snake_direction(&mut self, slot: SnakeSlot) {
+        // 先读取蛇当前的头部位置和控制状态，手动模式不参与自动转向。
         let snake = self.snake(slot);
+        if !matches!(snake.controller(), SnakeController::Ai(_)) {
+            return;
+        }
         let head = snake.head();
-        let mut ai_state = match snake.controller {
-            SnakeController::Ai(ai_state) => ai_state,
-            SnakeController::Manual => return,
-        };
+        let direction = snake.direction;
+
+        // AI 有小概率进入短暂漫游，避免始终只盯着最近食物走。
+        let mut rng = rand::rng();
+        if rng.random_range(0..100usize) < AI_ROAM_CHANCE_PERCENT as usize {
+            self.snake_mut(slot).start_roaming(AI_ROAM_STEPS);
+        }
+
+        // 先筛出不会立刻撞墙或撞到其他蛇的安全方向。
         let mut directions = self.get_snake_safe_directions(slot);
-        let mut next_direction = None;
+        if directions.is_empty() {
+            return;
+        }
 
-        if !directions.is_empty() {
-            let mut rng = rand::rng();
-            if ai_state.roaming_steps == 0
-                && rng.random_range(0..100usize) < AI_ROAM_CHANCE_PERCENT as usize
-            {
-                ai_state.roaming_steps = AI_ROAM_STEPS;
+        // 漫游期间优先保持当前方向，只有当前方向不安全时才切换。
+        if self.snake(slot).is_roaming() {
+            if directions.contains(&direction) {
+                return;
             }
-
-            if ai_state.roaming_steps > 0 {
-                ai_state.roaming_steps -= 1;
-                let index = rng.random_range(0..directions.len());
-                next_direction = Some(directions.swap_remove(index));
-            } else if let Some(target) = self
-                .foods
-                .iter()
-                .min_by_key(|food| head.distance_to(food.point))
-                .copied()
-            {
-                directions.sort_by_key(|direction| {
-                    let next_head = head.step(*direction);
-                    next_head.distance_to(target.point)
-                });
-                next_direction = directions.into_iter().next();
-            } else {
-                next_direction = Some(directions.swap_remove(0));
-            }
+            let index = rng.random_range(0..directions.len());
+            self.snake_mut(slot)
+                .set_direction(directions.swap_remove(index));
+            return;
         }
 
-        let snake = self.snake_mut(slot);
-        if let SnakeController::Ai(state) = &mut snake.controller {
-            *state = ai_state;
-        }
-        if let Some(direction) = next_direction {
-            snake.set_direction(direction);
-        }
+        // 常规模式下优先选择能让蛇头更接近最近食物的安全方向。
+        let direction = if let Some(target) = self
+            .foods
+            .iter()
+            .min_by_key(|food| head.distance_to(food.point))
+            .copied()
+        {
+            directions.sort_by_key(|direction| {
+                let next_head = head.step(*direction);
+                next_head.distance_to(target.point)
+            });
+            directions.swap_remove(0)
+        } else {
+            directions.swap_remove(0)
+        };
+
+        // 将最终方向写回蛇实例。
+        self.snake_mut(slot).set_direction(direction);
     }
 
     /// 推进指定蛇的一次移动，并返回是否在碰撞中死亡。
@@ -694,7 +733,7 @@ impl GameSnake {
             let food = self.foods.swap_remove(food_index);
             self.snake_mut(slot).eat(food);
         }
-        self.snake_mut(slot).forward();
+        self.snake_mut(slot).advance();
         false
     }
 
