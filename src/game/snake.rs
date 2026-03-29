@@ -995,8 +995,7 @@ impl GameSnake {
 
     /// 按当前状态重建一份仅包含符号的棋盘快照。
     fn update_symbols(&mut self) {
-        self.symbols =
-            vec![vec![EMPTY_SYMBOL; self.size.width]; self.size.height];
+        self.symbols = vec![vec![EMPTY_SYMBOL; self.size.width]; self.size.height];
         for food in &self.foods {
             self.symbols[food.point.y as usize][food.point.x as usize] = food.symbol;
         }

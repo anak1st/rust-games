@@ -21,7 +21,6 @@ src/
   main.rs
   app.rs
   game/
-    common.rs
     mod.rs
     counter.rs
     snake.rs
@@ -32,7 +31,6 @@ src/
 - `main.rs` 负责程序入口和启动 `ratatui`
 - `app.rs` 负责应用状态、界面切换、暂停状态、事件处理和界面绘制
 - `game/mod.rs` 定义最小 `Game` trait、`GameKind` 和共享类型
-- `game/common.rs` 定义方向、尺寸、坐标、状态等共享基础类型
 - `game/counter.rs` 实现最小的“计数器”游戏
 - `game/snake.rs` 实现带敌蛇和基础 AI 的“贪吃蛇”游戏
 
@@ -147,16 +145,6 @@ src/
 - 让 `GameKind` 提供标题等类型级元数据
 - 导出 `GameSize`、`Point`、`Direction`、`GameStatus`
 - 定义 footer 使用的 `Instruction`
-
-### `game/common.rs`
-
-职责：
-
-- 定义游戏共用的尺寸类型 `GameSize`
-- 定义游戏共用的坐标类型 `Point`
-- 定义方向 `Direction`
-- 定义状态 `GameStatus`
-- 统一基础数值类型约定
 
 当前内部约定：
 

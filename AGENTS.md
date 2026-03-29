@@ -19,7 +19,6 @@ src/
   main.rs
   app.rs
   game/
-    common.rs
     mod.rs
     counter.rs
     snake.rs
@@ -38,8 +37,8 @@ src/
 
 - `src/app.rs`
   负责顶层循环、界面切换、统一弹窗、尺寸变化和应用层状态
-- `src/game/common.rs`
-  放共享类型，例如 `GameSize`、`Point`、`Direction`、`GameStatus`
+- `src/game/mod.rs`
+  放共享类型、`GameKind` 和 `Game` trait
 - `src/game/counter.rs`
   最小示例游戏
 - `src/game/snake.rs`
