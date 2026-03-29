@@ -28,53 +28,6 @@ const AI_ROAM_CHANCE_PERCENT: u8 = 5;
 const AI_ROAM_STEPS: u8 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SnakeController {
-    Manual,
-    Ai(AiState),
-}
-
-impl SnakeController {
-    /// 返回控制模式在界面中展示的文案。
-    fn label(self) -> &'static str {
-        match self {
-            SnakeController::Manual => "手动",
-            SnakeController::Ai(_) => "AI",
-        }
-    }
-
-    /// 返回该控制模式是否接受玩家输入。
-    fn accepts_manual_input(self) -> bool {
-        matches!(self, SnakeController::Manual)
-    }
-
-    /// 在手动和 AI 控制之间切换。
-    fn toggled(self) -> SnakeController {
-        match self {
-            SnakeController::Manual => SnakeController::Ai(AiState::default()),
-            SnakeController::Ai(_) => SnakeController::Manual,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-struct AiState {
-    roaming_steps: u8,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SnakeState {
-    Idle,
-    Alive,
-    Dead { remaining: u8 },
-}
-
-#[derive(Debug)]
-struct SnakeSpawn {
-    body: Vec<Point>,
-    direction: Direction,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FoodKind {
     Normal,
     Corpse,
@@ -116,6 +69,15 @@ impl Food {
     fn is_normal(self) -> bool {
         self.kind == FoodKind::Normal
     }
+
+    /// 返回给定位置上的食物渲染信息。
+    fn render(&self, point: Point) -> Option<(&'static str, Color)> {
+        if self.point == point {
+            Some((self.symbol, self.color))
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -132,15 +94,6 @@ impl Corpse {
         self.point == point
     }
 
-    /// 返回给定位置上的尸块渲染信息。
-    fn cell(&self, point: Point) -> Option<(&'static str, Color)> {
-        if self.point == point {
-            Some((self.symbol, self.color))
-        } else {
-            None
-        }
-    }
-
     /// 推进一次尸块倒计时，并返回这块尸块是否该转成食物。
     fn tick(&mut self) -> bool {
         if self.food_remaining == 0 {
@@ -149,6 +102,62 @@ impl Corpse {
         self.food_remaining -= 1;
         false
     }
+
+    /// 返回给定位置上的尸块渲染信息。
+    fn render(&self, point: Point) -> Option<(&'static str, Color)> {
+        if self.point == point {
+            Some((self.symbol, self.color))
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SnakeController {
+    Manual,
+    Ai(SnakeAiState),
+}
+
+impl SnakeController {
+    /// 返回控制模式在界面中展示的文案。
+    fn label(self) -> &'static str {
+        match self {
+            SnakeController::Manual => "手动",
+            SnakeController::Ai(_) => "AI",
+        }
+    }
+
+    /// 返回该控制模式是否接受玩家输入。
+    fn accepts_manual_input(self) -> bool {
+        matches!(self, SnakeController::Manual)
+    }
+
+    /// 在手动和 AI 控制之间切换。
+    fn toggled(self) -> SnakeController {
+        match self {
+            SnakeController::Manual => SnakeController::Ai(SnakeAiState::default()),
+            SnakeController::Ai(_) => SnakeController::Manual,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct SnakeAiState {
+    roaming_steps: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SnakeState {
+    Idle,
+    Alive,
+    Dead { remaining: u8 },
+}
+
+#[derive(Debug)]
+struct SnakeSpawn {
+    body: Vec<Point>,
+    direction: Direction,
 }
 
 #[derive(Debug)]
@@ -208,7 +217,7 @@ impl Snake {
         Self {
             body,
             direction: Direction::Left,
-            controller: SnakeController::Ai(AiState::default()),
+            controller: SnakeController::Ai(SnakeAiState::default()),
             head_symbol,
             body_symbol,
             head_color,
@@ -224,19 +233,23 @@ impl Snake {
         self.body[0]
     }
 
+    /// 根据当前方向计算下一帧蛇头的位置。
+    fn head_next(&self) -> Point {
+        self.head().step(self.direction)
+    }
+
     /// 返回蛇当前的身体长度。
     fn len(&self) -> usize {
         self.body.len()
     }
 
-    /// 返回蛇尾后方紧跟着的位置。
-    fn tail_follow_point(&self) -> Option<Point> {
-        if !self.is_alive() || self.body.len() < 2 {
-            return None;
+    /// 返回蛇本次移动后需要保留的身体长度。
+    fn len_next(&self, ate_food: bool) -> usize {
+        if self.pending_growth > 0 || ate_food {
+            self.len()
+        } else {
+            self.len() - 1
         }
-        let tail = self.body[self.body.len() - 1];
-        let before_tail = self.body[self.body.len() - 2];
-        Some(tail.offset(tail.x - before_tail.x, tail.y - before_tail.y))
     }
 
     /// 返回蛇当前累计分数。
@@ -254,11 +267,6 @@ impl Snake {
         matches!(self.state, SnakeState::Alive)
     }
 
-    /// 根据当前方向计算下一帧蛇头的位置。
-    fn next_head(&self) -> Point {
-        self.head().step(self.direction)
-    }
-
     /// 判断给定位置是否被整条蛇占用。
     fn contains(&self, point: Point) -> bool {
         self.is_alive() && self.body.contains(&point)
@@ -274,15 +282,6 @@ impl Snake {
         self.is_alive() && self.body.len() > 1 && self.body[1..].contains(&point)
     }
 
-    /// 返回蛇本次移动后需要保留的身体长度。
-    fn body_len_after_move(&self, ate_food: bool) -> usize {
-        if self.pending_growth > 0 || ate_food {
-            self.len()
-        } else {
-            self.len() - 1
-        }
-    }
-
     /// 更新蛇当前的移动方向。
     fn set_direction(&mut self, direction: Direction) {
         self.direction = direction;
@@ -291,7 +290,7 @@ impl Snake {
     /// 让蛇沿当前方向前进一步。
     fn advance(&mut self) {
         self.advance_roaming();
-        let next_head = self.next_head();
+        let next_head = self.head_next();
         self.body.insert(0, next_head);
         if self.pending_growth > 0 {
             self.pending_growth -= 1;
@@ -341,16 +340,8 @@ impl Snake {
             .enumerate()
             .map(|(index, point)| Corpse {
                 point: *point,
-                symbol: if index == 0 {
-                    self.head_symbol
-                } else {
-                    self.body_symbol
-                },
-                color: if index == 0 {
-                    self.head_color
-                } else {
-                    self.body_color
-                },
+                symbol: self.body_symbol,
+                color: self.body_color,
                 food_remaining: index,
             })
             .collect();
@@ -363,7 +354,7 @@ impl Snake {
     }
 
     /// 推进一次死亡等待，并返回是否已经等完。
-    fn tick_dead_wait(&mut self) -> bool {
+    fn tick_dead(&mut self) -> bool {
         match &mut self.state {
             SnakeState::Idle | SnakeState::Alive => false,
             SnakeState::Dead { remaining } => {
@@ -383,7 +374,18 @@ impl Snake {
         self.pending_growth = 0;
         self.state = SnakeState::Alive;
         if let SnakeController::Ai(state) = &mut self.controller {
-            *state = AiState::default();
+            *state = SnakeAiState::default();
+        }
+    }
+
+    /// 返回蛇定位置上的渲染信息。
+    fn render(&self, point: Point) -> Option<(&'static str, Color)> {
+        if self.head_contains(point) {
+            Some((self.head_symbol, self.head_color))
+        } else if self.body_contains(point) {
+            Some((self.body_symbol, self.body_color))
+        } else {
+            None
         }
     }
 }
@@ -710,7 +712,7 @@ impl GameSnake {
             return true;
         }
         // 判断是否撞到自己。
-        let body_len = snake.body_len_after_move(ate_food);
+        let body_len = snake.len_next(ate_food);
         if snake.body[..body_len].contains(&next_head) {
             return true;
         }
@@ -732,9 +734,6 @@ impl GameSnake {
         other_snakes.iter().any(|other_snake| {
             if !other_snake.is_alive() {
                 return false;
-            }
-            if other_snake.tail_follow_point() == Some(next_head) {
-                return true;
             }
             next_head.distance_to(other_snake.head()) == 1
         })
@@ -849,7 +848,7 @@ impl GameSnake {
 
     /// 推进指定蛇的一次移动，并返回是否在碰撞中死亡。
     fn advance_snake(&mut self, slot: SnakeSlot) -> bool {
-        let next_head = self.snake(slot).next_head();
+        let next_head = self.snake(slot).head_next();
         let food_index = self.foods.iter().position(|food| food.point == next_head);
         let ate_food = food_index.is_some();
         let blocked = match slot {
@@ -902,7 +901,7 @@ impl GameSnake {
                     self.spawn_snake(snake_index);
                 }
                 SnakeState::Dead { .. } => {
-                    if self.snakes[snake_index].tick_dead_wait() {
+                    if self.snakes[snake_index].tick_dead() {
                         self.spawn_snake(snake_index);
                     }
                 }
@@ -936,38 +935,30 @@ impl GameSnake {
     fn render_cell(&self, point: Point) -> Span<'static> {
         let mut symbol = ".";
         let mut color = Color::DarkGray;
-        if let Some(food) = self.foods.iter().find(|food| food.point == point) {
-            symbol = food.symbol;
-            color = food.color;
+        for food in &self.foods {
+            if let Some((symbol_symbol, symbol_color)) = food.render(point) {
+                symbol = symbol_symbol;
+                color = symbol_color;
+                break;
+            }
         }
         for corpse in &self.corpses {
-            if let Some((corpse_symbol, corpse_color)) = corpse.cell(point) {
+            if let Some((corpse_symbol, corpse_color)) = corpse.render(point) {
                 symbol = corpse_symbol;
                 color = corpse_color;
                 break;
             }
         }
         for snake in &self.snakes {
-            if snake.body_contains(point) {
-                symbol = snake.body_symbol;
-                color = snake.body_color;
+            if let Some((symbol_symbol, symbol_color)) = snake.render(point) {
+                symbol = symbol_symbol;
+                color = symbol_color;
                 break;
             }
         }
-        for snake in &self.snakes {
-            if snake.head_contains(point) {
-                symbol = snake.head_symbol;
-                color = snake.head_color;
-                break;
-            }
-        }
-        if self.player.body_contains(point) {
-            symbol = self.player.body_symbol;
-            color = self.player.body_color;
-        }
-        if self.player.head_contains(point) {
-            symbol = self.player.head_symbol;
-            color = self.player.head_color;
+        if let Some((symbol_symbol, symbol_color)) = self.player.render(point) {
+            symbol = symbol_symbol;
+            color = symbol_color;
         }
         Span::styled(symbol, Style::new().fg(color))
     }
