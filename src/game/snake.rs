@@ -24,12 +24,14 @@ const FRAMES_PER_STEP: u8 = 4;
 const FOOD_COUNT: usize = 3;
 const AI_COUNT: usize = 4;
 const DEAD_WAIT_STEPS: u8 = 10;
-const AI_ROAM_CHANCE_PERCENT: u8 = 5;
+const AI_ROAM_CHANCE_PERCENT: u8 = 4;
 const AI_ROAM_STEPS: u8 = 4;
+const SUPER_FOOD_CHANCE_DENOMINATOR: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FoodKind {
     Normal,
+    Super,
     Corpse,
 }
 
@@ -43,14 +45,20 @@ struct Food {
 }
 
 impl Food {
-    /// 创建一个默认食物。
+    /// 创建一个常规刷新的食物，其中有概率变成超级食物。
     fn new(point: Point) -> Self {
+        let mut rng = rand::rng();
+        let is_super = rng.random_range(0..SUPER_FOOD_CHANCE_DENOMINATOR) == 0;
         Self {
             point,
-            growth: 1,
-            symbol: "*",
-            color: Color::Magenta,
-            kind: FoodKind::Normal,
+            growth: if is_super { 4 } else { 1 },
+            symbol: if is_super { "$" } else { "*" },
+            color: Color::Yellow,
+            kind: if is_super {
+                FoodKind::Super
+            } else {
+                FoodKind::Normal
+            },
         }
     }
 
@@ -65,17 +73,23 @@ impl Food {
         }
     }
 
-    /// 返回该食物是否属于常规刷新食物。
-    fn is_normal(self) -> bool {
-        self.kind == FoodKind::Normal
+    /// 返回该食物是否属于刷食逻辑维护的常规食物池。
+    fn is_spawned(self) -> bool {
+        matches!(self.kind, FoodKind::Normal | FoodKind::Super)
     }
 
     /// 返回给定位置上的食物渲染信息。
-    fn render(&self, point: Point) -> Option<(&'static str, Color)> {
-        if self.point == point {
+    fn render(&self, point: Point, frame: u8) -> Option<(&'static str, Color)> {
+        if self.point != point {
+            return None;
+        }
+        if matches!(self.kind, FoodKind::Corpse | FoodKind::Normal) {
+            return Some((self.symbol, self.color));
+        }
+        if frame % 10 <= 4 {
             Some((self.symbol, self.color))
         } else {
-            None
+            Some((self.symbol, Color::White))
         }
     }
 }
@@ -208,10 +222,10 @@ impl Snake {
             _ => "z",
         };
         let (head_color, body_color) = match index {
-            0 => (Color::LightGreen, Color::Green),
-            1 => (Color::LightYellow, Color::Yellow),
-            2 => (Color::LightRed, Color::Red),
-            3 => (Color::LightBlue, Color::Blue),
+            0 => (Color::Red, Color::Red),
+            1 => (Color::Green, Color::Green),
+            2 => (Color::Blue, Color::Blue),
+            3 => (Color::Magenta, Color::Magenta),
             _ => (Color::Gray, Color::DarkGray),
         };
         Self {
@@ -447,9 +461,9 @@ impl GameSnake {
             || self.is_corpse_occupied(point)
     }
 
-    /// 返回当前棋盘上的常规食物数量。
-    fn normal_food_count(&self) -> usize {
-        self.foods.iter().filter(|food| food.is_normal()).count()
+    /// 返回当前棋盘上由刷食逻辑维护的食物数量。
+    fn spawned_food_count(&self) -> usize {
+        self.foods.iter().filter(|food| food.is_spawned()).count()
     }
 
     /// 判断给定位置是否被玩家占用。
@@ -669,7 +683,7 @@ impl GameSnake {
 
     /// 将常规食物补到目标数量，不受尸块食物数量影响。
     fn spawn_foods(&mut self) {
-        while self.normal_food_count() < FOOD_COUNT {
+        while self.spawned_food_count() < FOOD_COUNT {
             let mut empty_points = Vec::new();
             for y in 0..self.size.height as i16 {
                 for x in 0..self.size.width as i16 {
@@ -936,7 +950,7 @@ impl GameSnake {
         let mut symbol = ".";
         let mut color = Color::DarkGray;
         for food in &self.foods {
-            if let Some((symbol_symbol, symbol_color)) = food.render(point) {
+            if let Some((symbol_symbol, symbol_color)) = food.render(point, self.frame) {
                 symbol = symbol_symbol;
                 color = symbol_color;
                 break;
@@ -971,10 +985,9 @@ impl Game for GameSnake {
             return;
         }
         self.frame += 1;
-        if self.frame < FRAMES_PER_STEP {
+        if self.frame % FRAMES_PER_STEP != 0 {
             return;
         }
-        self.frame = 0;
         self.update_corpses();
         self.update_snakes();
         self.update_player();
