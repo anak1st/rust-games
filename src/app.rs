@@ -43,8 +43,8 @@ fn calculate_game_size(width: u16, height: u16) -> Option<GameSize> {
         return None;
     }
     Some(GameSize {
-        width: width - STATUS_WIDTH - 2,
-        height: height - TITLE_HEIGHT - FOOTER_HEIGHT - 2,
+        width: (width - STATUS_WIDTH - 2) as usize,
+        height: (height - TITLE_HEIGHT - FOOTER_HEIGHT - 2) as usize,
     })
 }
 

@@ -18,15 +18,16 @@ const INSTRUCTIONS: [Instruction; 2] = [
     },
 ];
 
-const MIN_WIDTH: u16 = 12;
-const MIN_HEIGHT: u16 = 8;
-const FRAMES_PER_STEP: u8 = 4;
+const MIN_WIDTH: usize = 12;
+const MIN_HEIGHT: usize = 8;
+const FRAMES_PER_STEP: usize = 4;
 const FOOD_COUNT: usize = 3;
 const AI_COUNT: usize = 4;
-const DEAD_WAIT_STEPS: u8 = 10;
-const AI_ROAM_CHANCE_PERCENT: u8 = 4;
-const AI_ROAM_STEPS: u8 = 4;
+const DEAD_WAIT_STEPS: usize = 10;
+const AI_ROAM_CHANCE_PERCENT: usize = 4;
+const AI_ROAM_STEPS: usize = 4;
 const SUPER_FOOD_CHANCE_DENOMINATOR: usize = 4;
+const EMPTY_SYMBOL: &str = ".";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FoodKind {
@@ -79,7 +80,7 @@ impl Food {
     }
 
     /// 返回给定位置上的食物渲染信息。
-    fn render(&self, point: Point, frame: u8) -> Option<(&'static str, Color)> {
+    fn render(&self, point: Point, frame: usize) -> Option<(&'static str, Color)> {
         if self.point != point {
             return None;
         }
@@ -158,14 +159,14 @@ impl SnakeController {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct SnakeAiState {
-    roaming_steps: u8,
+    roaming_steps: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SnakeState {
     Idle,
     Alive,
-    Dead { remaining: u8 },
+    Dead { remaining: usize },
 }
 
 #[derive(Debug)]
@@ -322,7 +323,7 @@ impl Snake {
     }
 
     /// 让 AI 蛇进入一段固定步数的漫游状态。
-    fn start_roaming(&mut self, steps: u8) {
+    fn start_roaming(&mut self, steps: usize) {
         if let SnakeController::Ai(state) = &mut self.controller {
             if state.roaming_steps == 0 {
                 state.roaming_steps = steps;
@@ -346,8 +347,8 @@ impl Snake {
     }
 
     /// 死亡并把当前身体拆成一组带时间的尸块。
-    fn die(&mut self, remaining: u8) -> Vec<Corpse> {
-        let total_remaining = remaining.saturating_add(self.body.len() as u8);
+    fn die(&mut self, remaining: usize) -> Vec<Corpse> {
+        let total_remaining = remaining.saturating_add(self.body.len());
         let corpses = self
             .body
             .iter()
@@ -418,7 +419,8 @@ pub struct GameSnake {
     snakes: Vec<Snake>,
     corpses: Vec<Corpse>,
     foods: Vec<Food>,
-    frame: u8,
+    symbols: Vec<Vec<&'static str>>,
+    frame: usize,
 }
 
 impl GameSnake {
@@ -432,6 +434,7 @@ impl GameSnake {
                 snakes: vec![],
                 corpses: vec![],
                 foods: vec![],
+                symbols: vec![],
                 frame: 0,
             };
         }
@@ -442,6 +445,7 @@ impl GameSnake {
             snakes: vec![],
             corpses: vec![],
             foods: vec![],
+            symbols: vec![vec![EMPTY_SYMBOL; size.width as usize]; size.height as usize],
             frame: 0,
         };
         for index in 0..AI_COUNT {
@@ -449,6 +453,7 @@ impl GameSnake {
             game.spawn_snake(index);
         }
         game.spawn_foods();
+        game.update_symbols();
         game
     }
 
@@ -459,11 +464,6 @@ impl GameSnake {
         self.is_player_occupied(point)
             || self.is_snakes_occupied(point)
             || self.is_corpse_occupied(point)
-    }
-
-    /// 返回当前棋盘上由刷食逻辑维护的食物数量。
-    fn spawned_food_count(&self) -> usize {
-        self.foods.iter().filter(|food| food.is_spawned()).count()
     }
 
     /// 判断给定位置是否被玩家占用。
@@ -490,8 +490,8 @@ impl GameSnake {
     fn is_inside(&self, point: Point) -> bool {
         point.x >= 0
             && point.y >= 0
-            && point.x < self.size.width as i16
-            && point.y < self.size.height as i16
+            && point.x < self.size.width as isize
+            && point.y < self.size.height as isize
     }
 
     /// 判断一组位置是否可以安全放下一条蛇。
@@ -517,12 +517,17 @@ impl GameSnake {
         }
     }
 
+    /// 返回当前棋盘上由刷食逻辑维护的食物数量。
+    fn spawned_food_count(&self) -> usize {
+        self.foods.iter().filter(|food| food.is_spawned()).count()
+    }
+
     // spawn
 
     /// 创建玩家初始蛇。
     fn spawn_player(size: GameSize) -> Snake {
-        let center_x = (size.width / 2) as i16;
-        let center_y = (size.height / 2) as i16;
+        let center_x = (size.width / 2) as isize;
+        let center_y = (size.height / 2) as isize;
         Snake::new_player(
             vec![
                 Point {
@@ -544,8 +549,8 @@ impl GameSnake {
 
     /// 为一条 AI 蛇随机选择出生位置。
     fn spawn_snake(&mut self, snake_index: usize) -> bool {
-        let right = self.size.width as i16 - 1;
-        let bottom = self.size.height as i16 - 1;
+        let right = self.size.width as isize - 1;
+        let bottom = self.size.height as isize - 1;
         let mut corner_candidates = Vec::new();
         for spawn in [
             SnakeSpawn {
@@ -649,8 +654,8 @@ impl GameSnake {
         }
 
         let mut candidates = Vec::new();
-        for y in 0..self.size.height as i16 {
-            for x in 0..self.size.width as i16 {
+        for y in 0..self.size.height as isize {
+            for x in 0..self.size.width as isize {
                 let head = Point { x, y };
                 for direction in [
                     Direction::Up,
@@ -685,8 +690,8 @@ impl GameSnake {
     fn spawn_foods(&mut self) {
         while self.spawned_food_count() < FOOD_COUNT {
             let mut empty_points = Vec::new();
-            for y in 0..self.size.height as i16 {
-                for x in 0..self.size.width as i16 {
+            for y in 0..self.size.height as isize {
+                for x in 0..self.size.width as isize {
                     let point = Point { x, y };
                     if self.is_occupied(point) || self.is_foods_occupied(point) {
                         continue;
@@ -743,14 +748,56 @@ impl GameSnake {
         false
     }
 
+    /// 估算蛇前进一步后，从新蛇头出发还能到达多少空位。
+    fn reachable_space_after_move(&self, next_head: Point, limit: usize) -> usize {
+        let mut visited = vec![vec![false; self.size.width as usize]; self.size.height as usize];
+        let mut stack = vec![next_head];
+        let mut reachable = 0;
+        visited[next_head.y as usize][next_head.x as usize] = true;
+        while let Some(point) = stack.pop() {
+            reachable += 1;
+            if reachable > limit {
+                return reachable;
+            }
+            for direction in [
+                Direction::Up,
+                Direction::Down,
+                Direction::Left,
+                Direction::Right,
+            ] {
+                let next_point = point.step(direction);
+                if !self.is_inside(next_point) {
+                    continue;
+                }
+                let y = next_point.y as usize;
+                let x = next_point.x as usize;
+                if visited[y][x] {
+                    continue;
+                }
+                if !matches!(self.symbols[y][x], EMPTY_SYMBOL | "*" | "$") {
+                    continue;
+                }
+                visited[y][x] = true;
+                stack.push(next_point);
+            }
+        }
+
+        reachable
+    }
+
     /// 判断一个落点是否属于“虽然不撞，但最好避开”的风险位置。
-    fn is_next_risky(&self, next_head: Point, other_snakes: &[&Snake]) -> bool {
-        other_snakes.iter().any(|other_snake| {
+    fn is_next_risky(&self, snake: &Snake, other_snakes: &[&Snake], next_head: Point) -> bool {
+        let near_other_head = other_snakes.iter().any(|other_snake| {
             if !other_snake.is_alive() {
                 return false;
             }
             next_head.distance_to(other_snake.head()) == 1
-        })
+        });
+        if near_other_head {
+            return true;
+        }
+        let reachable_space = self.reachable_space_after_move(next_head, snake.len() * 2);
+        reachable_space <= snake.len() * 2
     }
 
     /// 收集给定蛇下一步可安全移动的方向。
@@ -789,7 +836,7 @@ impl GameSnake {
                 continue;
             }
             safe_directions.push(direction);
-            if !self.is_next_risky(next_head, &other_snakes) {
+            if !self.is_next_risky(snake, &other_snakes, next_head) {
                 preferred_directions.push(direction);
             }
         }
@@ -819,7 +866,7 @@ impl GameSnake {
 
         // AI 有小概率进入短暂漫游，避免始终只盯着最近食物走。
         let mut rng = rand::rng();
-        if rng.random_range(0..100usize) < AI_ROAM_CHANCE_PERCENT as usize {
+        if rng.random_range(0..100usize) < AI_ROAM_CHANCE_PERCENT {
             self.snake_mut(slot).start_roaming(AI_ROAM_STEPS);
         }
 
@@ -905,6 +952,7 @@ impl GameSnake {
         if self.advance_snake(SnakeSlot::Player) {
             self.status = GameStatus::Lost;
         }
+        self.update_symbols();
     }
 
     /// 推进所有 AI 蛇的一次移动。
@@ -926,6 +974,7 @@ impl GameSnake {
                     }
                 }
             }
+            self.update_symbols();
         }
     }
 
@@ -941,6 +990,40 @@ impl GameSnake {
             }
         }
         self.corpses = remaining_corpses;
+        self.update_symbols();
+    }
+
+    /// 按当前状态重建一份仅包含符号的棋盘快照。
+    fn update_symbols(&mut self) {
+        self.symbols =
+            vec![vec![EMPTY_SYMBOL; self.size.width]; self.size.height];
+        for food in &self.foods {
+            self.symbols[food.point.y as usize][food.point.x as usize] = food.symbol;
+        }
+        for corpse in &self.corpses {
+            self.symbols[corpse.point.y as usize][corpse.point.x as usize] = corpse.symbol;
+        }
+        for snake in &self.snakes {
+            if !snake.is_alive() {
+                continue;
+            }
+            for (index, point) in snake.body.iter().enumerate() {
+                self.symbols[point.y as usize][point.x as usize] = if index == 0 {
+                    snake.head_symbol
+                } else {
+                    snake.body_symbol
+                };
+            }
+        }
+        if self.player.is_alive() {
+            for (index, point) in self.player.body.iter().enumerate() {
+                self.symbols[point.y as usize][point.x as usize] = if index == 0 {
+                    self.player.head_symbol
+                } else {
+                    self.player.body_symbol
+                };
+            }
+        }
     }
 
     // render
@@ -992,6 +1075,7 @@ impl Game for GameSnake {
         self.update_snakes();
         self.update_player();
         self.spawn_foods();
+        self.update_symbols();
     }
 
     /// 返回贪吃蛇游戏当前状态。
@@ -1004,10 +1088,10 @@ impl Game for GameSnake {
         if self.status == GameStatus::WindowTooSmall {
             return Text::from("贪吃蛇区域太小");
         }
-        let mut lines = Vec::with_capacity(self.size.height as usize);
-        for y in 0..self.size.height as i16 {
-            let mut spans = Vec::with_capacity(self.size.width as usize);
-            for x in 0..self.size.width as i16 {
+        let mut lines = Vec::with_capacity(self.size.height);
+        for y in 0..self.size.height as isize {
+            let mut spans = Vec::with_capacity(self.size.width);
+            for x in 0..self.size.width as isize {
                 spans.push(self.render_cell(Point { x, y }));
             }
             lines.push(Line::from(spans));

@@ -8,24 +8,24 @@ pub struct Instruction {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct GameSize {
-    pub width: u16,
-    pub height: u16,
+    pub width: usize,
+    pub height: usize,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Point {
-    pub x: i16,
-    pub y: i16,
+    pub x: isize,
+    pub y: isize,
 }
 
 impl Point {
     /// 返回当前点到目标点的曼哈顿距离。
-    pub fn distance_to(self, other: Point) -> i16 {
+    pub fn distance_to(self, other: Point) -> isize {
         (self.x - other.x).abs() + (self.y - other.y).abs()
     }
 
     /// 返回沿给定偏移量移动后的坐标。
-    pub fn offset(self, dx: i16, dy: i16) -> Point {
+    pub fn offset(self, dx: isize, dy: isize) -> Point {
         Point {
             x: self.x + dx,
             y: self.y + dy,
