@@ -171,6 +171,16 @@ impl Snake {
         self.body.len()
     }
 
+    /// 返回蛇尾后方紧跟着的位置。
+    fn tail_follow_point(&self) -> Option<Point> {
+        if !self.is_alive() || self.body.len() < 2 {
+            return None;
+        }
+        let tail = self.body[self.body.len() - 1];
+        let before_tail = self.body[self.body.len() - 2];
+        Some(tail.offset(tail.x - before_tail.x, tail.y - before_tail.y))
+    }
+
     /// 返回蛇当前累计分数。
     fn score(&self) -> usize {
         self.score
@@ -608,40 +618,64 @@ impl GameSnake {
         false
     }
 
+    /// 判断一个落点是否属于“虽然不撞，但最好避开”的风险位置。
+    fn is_risky_next_head(&self, next_head: Point, other_snakes: &[&Snake]) -> bool {
+        other_snakes.iter().any(|other_snake| {
+            if !other_snake.is_alive() {
+                return false;
+            }
+            if other_snake.tail_follow_point() == Some(next_head) {
+                return true;
+            }
+            next_head.distance_to(other_snake.head()) == 1
+        })
+    }
+
     /// 收集给定蛇下一步可安全移动的方向。
+    ///
+    /// 这里会优先返回“不撞且不紧跟其他蛇尾巴、也不贴近其他蛇头”的方向；
+    /// 如果这样的方向一个都没有，再退回到一般意义上的安全方向。
     fn get_snake_safe_directions(&self, slot: SnakeSlot) -> Vec<Direction> {
         let snake = self.snake(slot);
-        let mut directions = vec![
+        let other_snakes = match slot {
+            SnakeSlot::Player => self.snakes.iter().collect::<Vec<_>>(),
+            SnakeSlot::Enemy(snake_index) => {
+                let mut other_snakes = Vec::with_capacity(self.snakes.len());
+                other_snakes.push(&self.player);
+                for (index, other_snake) in self.snakes.iter().enumerate() {
+                    if index != snake_index {
+                        other_snakes.push(other_snake);
+                    }
+                }
+                other_snakes
+            }
+        };
+        let mut safe_directions = Vec::new();
+        let mut preferred_directions = Vec::new();
+        for direction in [
             Direction::Up,
             Direction::Down,
             Direction::Left,
             Direction::Right,
-        ];
-        directions.retain(|direction| {
+        ] {
             if direction.is_opposite(snake.direction) {
-                return false;
+                continue;
             }
-            let next_head = snake.head().step(*direction);
+            let next_head = snake.head().step(direction);
             let ate_food = self.foods.iter().any(|food| food.point == next_head);
-            let blocked = match slot {
-                SnakeSlot::Player => {
-                    let other_snakes = self.snakes.iter().collect::<Vec<_>>();
-                    self.hits_obstacle(snake, &other_snakes, next_head, ate_food)
-                }
-                SnakeSlot::Enemy(snake_index) => {
-                    let mut other_snakes = Vec::with_capacity(self.snakes.len());
-                    other_snakes.push(&self.player);
-                    for (index, other_snake) in self.snakes.iter().enumerate() {
-                        if index != snake_index {
-                            other_snakes.push(other_snake);
-                        }
-                    }
-                    self.hits_obstacle(snake, &other_snakes, next_head, ate_food)
-                }
-            };
-            !blocked
-        });
-        directions
+            if self.hits_obstacle(snake, &other_snakes, next_head, ate_food) {
+                continue;
+            }
+            safe_directions.push(direction);
+            if !self.is_risky_next_head(next_head, &other_snakes) {
+                preferred_directions.push(direction);
+            }
+        }
+        if preferred_directions.is_empty() {
+            safe_directions
+        } else {
+            preferred_directions
+        }
     }
 
     /// 按控制模式更新指定蛇的方向。
