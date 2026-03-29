@@ -1,3 +1,4 @@
+pub mod common;
 pub mod counter;
 pub mod snake;
 
@@ -5,10 +6,9 @@ use std::fmt::Debug;
 
 use clap::ValueEnum;
 use crossterm::event::KeyEvent;
-use ratatui::{
-    style::{Color, Style},
-    text::Text,
-};
+use ratatui::text::Text;
+
+pub use self::common::{Direction, GameSize, GameStatus, Instruction, Point};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum GameKind {
@@ -27,62 +27,6 @@ impl GameKind {
 }
 
 pub const GAMES: [GameKind; 2] = [GameKind::Counter, GameKind::Snake];
-
-#[derive(Debug, Clone, Copy)]
-pub struct Instruction {
-    pub label: &'static str,
-    pub key: &'static str,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct GameSize {
-    pub width: u16,
-    pub height: u16,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum GameStatus {
-    #[default]
-    Idle,
-    Main,
-    Ready,
-    Running,
-    Paused,
-    Won,
-    Lost,
-    WindowTooSmall,
-}
-
-impl GameStatus {
-    /// 返回游戏状态在界面中展示的文案。
-    pub fn label(self) -> &'static str {
-        match self {
-            GameStatus::Idle => "空闲",
-            GameStatus::Main => "主界面",
-            GameStatus::Ready => "准备",
-            GameStatus::Running => "进行中",
-            GameStatus::Paused => "已暂停",
-            GameStatus::Won => "已胜利",
-            GameStatus::Lost => "已失败",
-            GameStatus::WindowTooSmall => "窗口太小",
-        }
-    }
-
-    /// 返回游戏状态在界面中使用的样式。
-    pub fn style(self) -> Style {
-        let color = match self {
-            GameStatus::Idle => Color::Gray,
-            GameStatus::Main => Color::Cyan,
-            GameStatus::Ready => Color::LightGreen,
-            GameStatus::Running => Color::Green,
-            GameStatus::Paused => Color::Yellow,
-            GameStatus::Won => Color::Green,
-            GameStatus::Lost => Color::Red,
-            GameStatus::WindowTooSmall => Color::LightMagenta,
-        };
-        Style::new().fg(color)
-    }
-}
 
 /// 可嵌入应用外壳中的游戏所需遵循的最小约定。
 pub trait Game: Debug {

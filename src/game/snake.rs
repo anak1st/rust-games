@@ -5,7 +5,7 @@ use ratatui::{
     text::{Line, Span, Text},
 };
 
-use crate::game::{Game, GameSize, GameStatus, Instruction};
+use crate::game::{Direction, Game, GameSize, GameStatus, Instruction, Point};
 
 const INSTRUCTIONS: [Instruction; 1] = [Instruction {
     label: " 转向 ",
@@ -18,76 +18,6 @@ const FRAMES_PER_STEP: u8 = 4;
 const FOOD_COUNT: usize = 3;
 const AI_COUNT: usize = 4;
 const DEAD_WAIT_STEPS: u8 = 10;
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct Point {
-    x: i16,
-    y: i16,
-}
-
-impl Point {
-    /// 返回当前点到目标点的曼哈顿距离。
-    fn distance_to(self, other: Point) -> i16 {
-        (self.x - other.x).abs() + (self.y - other.y).abs()
-    }
-
-    /// 返回沿给定方向移动一步后的坐标。
-    fn step(self, direction: Direction) -> Point {
-        match direction {
-            Direction::Up => Point {
-                x: self.x,
-                y: self.y - 1,
-            },
-            Direction::Down => Point {
-                x: self.x,
-                y: self.y + 1,
-            },
-            Direction::Left => Point {
-                x: self.x - 1,
-                y: self.y,
-            },
-            Direction::Right => Point {
-                x: self.x + 1,
-                y: self.y,
-            },
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Direction {
-    Up,
-    Down,
-    Left,
-    Right,
-}
-
-impl Direction {
-    /// 返回方向在界面中展示的符号。
-    fn label(self) -> &'static str {
-        match self {
-            Direction::Up => "↑",
-            Direction::Down => "↓",
-            Direction::Left => "←",
-            Direction::Right => "→",
-        }
-    }
-
-    /// 返回当前方向的反方向。
-    fn opposite(self) -> Direction {
-        match self {
-            Direction::Up => Direction::Down,
-            Direction::Down => Direction::Up,
-            Direction::Left => Direction::Right,
-            Direction::Right => Direction::Left,
-        }
-    }
-
-    /// 判断两个方向是否彼此相反。
-    fn is_opposite(self, other: Direction) -> bool {
-        self.opposite() == other
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SnakeState {

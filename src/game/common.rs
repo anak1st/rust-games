@@ -1,0 +1,123 @@
+use ratatui::style::{Color, Style};
+
+#[derive(Debug, Clone, Copy)]
+pub struct Instruction {
+    pub label: &'static str,
+    pub key: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GameSize {
+    pub width: u16,
+    pub height: u16,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Point {
+    pub x: i16,
+    pub y: i16,
+}
+
+impl Point {
+    /// 返回当前点到目标点的曼哈顿距离。
+    pub fn distance_to(self, other: Point) -> i16 {
+        (self.x - other.x).abs() + (self.y - other.y).abs()
+    }
+
+    /// 返回沿给定偏移量移动后的坐标。
+    pub fn offset(self, dx: i16, dy: i16) -> Point {
+        Point {
+            x: self.x + dx,
+            y: self.y + dy,
+        }
+    }
+
+    /// 返回沿给定方向移动一步后的坐标。
+    pub fn step(self, direction: Direction) -> Point {
+        match direction {
+            Direction::Up => self.offset(0, -1),
+            Direction::Down => self.offset(0, 1),
+            Direction::Left => self.offset(-1, 0),
+            Direction::Right => self.offset(1, 0),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+impl Direction {
+    /// 返回方向在界面中展示的符号。
+    pub fn label(self) -> &'static str {
+        match self {
+            Direction::Up => "↑",
+            Direction::Down => "↓",
+            Direction::Left => "←",
+            Direction::Right => "→",
+        }
+    }
+
+    /// 返回当前方向的反方向。
+    pub fn opposite(self) -> Direction {
+        match self {
+            Direction::Up => Direction::Down,
+            Direction::Down => Direction::Up,
+            Direction::Left => Direction::Right,
+            Direction::Right => Direction::Left,
+        }
+    }
+
+    /// 判断两个方向是否彼此相反。
+    pub fn is_opposite(self, other: Direction) -> bool {
+        self.opposite() == other
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GameStatus {
+    #[default]
+    Idle,
+    Main,
+    Ready,
+    Running,
+    Paused,
+    Won,
+    Lost,
+    WindowTooSmall,
+}
+
+impl GameStatus {
+    /// 返回游戏状态在界面中展示的文案。
+    pub fn label(self) -> &'static str {
+        match self {
+            GameStatus::Idle => "空闲",
+            GameStatus::Main => "主界面",
+            GameStatus::Ready => "准备",
+            GameStatus::Running => "进行中",
+            GameStatus::Paused => "已暂停",
+            GameStatus::Won => "已胜利",
+            GameStatus::Lost => "已失败",
+            GameStatus::WindowTooSmall => "窗口太小",
+        }
+    }
+
+    /// 返回游戏状态在界面中使用的样式。
+    pub fn style(self) -> Style {
+        let color = match self {
+            GameStatus::Idle => Color::Gray,
+            GameStatus::Main => Color::Cyan,
+            GameStatus::Ready => Color::LightGreen,
+            GameStatus::Running => Color::Green,
+            GameStatus::Paused => Color::Yellow,
+            GameStatus::Won => Color::Green,
+            GameStatus::Lost => Color::Red,
+            GameStatus::WindowTooSmall => Color::LightMagenta,
+        };
+        Style::new().fg(color)
+    }
+}
