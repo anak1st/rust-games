@@ -63,6 +63,7 @@ struct AiState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SnakeState {
+    Idle,
     Alive,
     Dead { remaining: u8 },
 }
@@ -73,12 +74,19 @@ struct SnakeSpawn {
     direction: Direction,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FoodKind {
+    Normal,
+    Corpse,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct Food {
     point: Point,
     growth: usize,
     symbol: &'static str,
     color: Color,
+    kind: FoodKind,
 }
 
 impl Food {
@@ -89,7 +97,57 @@ impl Food {
             growth: 1,
             symbol: "*",
             color: Color::Magenta,
+            kind: FoodKind::Normal,
         }
+    }
+
+    /// 使用尸块片段创建一个同色食物。
+    fn from_corpse(point: Point, color: Color) -> Self {
+        Self {
+            point,
+            growth: 1,
+            symbol: "*",
+            color,
+            kind: FoodKind::Corpse,
+        }
+    }
+
+    /// 返回该食物是否属于常规刷新食物。
+    fn is_normal(self) -> bool {
+        self.kind == FoodKind::Normal
+    }
+}
+
+#[derive(Debug)]
+struct Corpse {
+    point: Point,
+    symbol: &'static str,
+    color: Color,
+    food_remaining: usize,
+}
+
+impl Corpse {
+    /// 判断给定位置是否被尸块占用。
+    fn contains(&self, point: Point) -> bool {
+        self.point == point
+    }
+
+    /// 返回给定位置上的尸块渲染信息。
+    fn cell(&self, point: Point) -> Option<(&'static str, Color)> {
+        if self.point == point {
+            Some((self.symbol, self.color))
+        } else {
+            None
+        }
+    }
+
+    /// 推进一次尸块倒计时，并返回这块尸块是否该转成食物。
+    fn tick(&mut self) -> bool {
+        if self.food_remaining == 0 {
+            return true;
+        }
+        self.food_remaining -= 1;
+        false
     }
 }
 
@@ -157,7 +215,7 @@ impl Snake {
             body_color,
             score: 0,
             pending_growth: 0,
-            state: SnakeState::Alive,
+            state: SnakeState::Idle,
         }
     }
 
@@ -193,7 +251,7 @@ impl Snake {
 
     /// 返回蛇当前是否仍然存活。
     fn is_alive(&self) -> bool {
-        self.state == SnakeState::Alive
+        matches!(self.state, SnakeState::Alive)
     }
 
     /// 根据当前方向计算下一帧蛇头的位置。
@@ -274,19 +332,40 @@ impl Snake {
         self.pending_growth += food.growth;
     }
 
-    /// 将蛇标记为死亡，并清空当前身体。
-    fn mark_dead(&mut self) {
+    /// 死亡并把当前身体拆成一组带时间的尸块。
+    fn die(&mut self, remaining: u8) -> Vec<Corpse> {
+        let total_remaining = remaining.saturating_add(self.body.len() as u8);
+        let corpses = self
+            .body
+            .iter()
+            .enumerate()
+            .map(|(index, point)| Corpse {
+                point: *point,
+                symbol: if index == 0 {
+                    self.head_symbol
+                } else {
+                    self.body_symbol
+                },
+                color: if index == 0 {
+                    self.head_color
+                } else {
+                    self.body_color
+                },
+                food_remaining: index,
+            })
+            .collect();
         self.body.clear();
         self.pending_growth = 0;
         self.state = SnakeState::Dead {
-            remaining: DEAD_WAIT_STEPS,
+            remaining: total_remaining,
         };
+        corpses
     }
 
-    /// 推进一次死亡等待，并返回是否可以尝试重生。
-    fn tick_dead(&mut self) -> bool {
+    /// 推进一次死亡等待，并返回是否已经等完。
+    fn tick_dead_wait(&mut self) -> bool {
         match &mut self.state {
-            SnakeState::Alive => false,
+            SnakeState::Idle | SnakeState::Alive => false,
             SnakeState::Dead { remaining } => {
                 if *remaining > 0 {
                     *remaining -= 1;
@@ -309,7 +388,7 @@ impl Snake {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SnakeSlot {
     Player,
     Enemy(usize),
@@ -321,6 +400,7 @@ pub struct GameSnake {
     status: GameStatus,
     player: Snake,
     snakes: Vec<Snake>,
+    corpses: Vec<Corpse>,
     foods: Vec<Food>,
     frame: u8,
 }
@@ -334,6 +414,7 @@ impl GameSnake {
                 status: GameStatus::WindowTooSmall,
                 player: Snake::new_player(vec![], SnakeController::Manual),
                 snakes: vec![],
+                corpses: vec![],
                 foods: vec![],
                 frame: 0,
             };
@@ -343,26 +424,50 @@ impl GameSnake {
             status: GameStatus::Running,
             player: Self::spawn_player(size),
             snakes: vec![],
+            corpses: vec![],
             foods: vec![],
             frame: 0,
         };
         for index in 0..AI_COUNT {
             game.snakes.push(Snake::new_ai(index, vec![]));
-            if !game.spawn_snake(index) {
-                game.snakes[index].mark_dead();
-            }
+            game.spawn_snake(index);
         }
-        while game.foods.len() < FOOD_COUNT {
-            game.spawn_food();
-        }
+        game.spawn_foods();
         game
     }
 
     /// helper
 
-    /// 判断给定位置是否被任意一条蛇占用。
+    /// 判断给定位置是否被任意不可食物体占用。
     fn is_occupied(&self, point: Point) -> bool {
-        self.player.contains(point) || self.snakes.iter().any(|snake| snake.contains(point))
+        self.is_player_occupied(point)
+            || self.is_snakes_occupied(point)
+            || self.is_corpse_occupied(point)
+    }
+
+    /// 返回当前棋盘上的常规食物数量。
+    fn normal_food_count(&self) -> usize {
+        self.foods.iter().filter(|food| food.is_normal()).count()
+    }
+
+    /// 判断给定位置是否被玩家占用。
+    fn is_player_occupied(&self, point: Point) -> bool {
+        self.player.contains(point)
+    }
+
+    /// 判断给定位置是否被任意一条蛇占用。
+    fn is_snakes_occupied(&self, point: Point) -> bool {
+        self.snakes.iter().any(|snake| snake.contains(point))
+    }
+
+    /// 判断给定位置是否被任意尸块占用。
+    fn is_corpse_occupied(&self, point: Point) -> bool {
+        self.corpses.iter().any(|corpse| corpse.contains(point))
+    }
+
+    /// 判断给定位置是否被任意食物食物体占用。
+    fn is_foods_occupied(&self, point: Point) -> bool {
+        self.foods.iter().any(|food| food.point == point)
     }
 
     /// 判断位置是否在棋盘内。
@@ -376,9 +481,7 @@ impl GameSnake {
     /// 判断一组位置是否可以安全放下一条蛇。
     fn is_valid_points(&self, points: &[Point]) -> bool {
         points.iter().all(|point| {
-            self.is_inside(*point)
-                && !self.is_occupied(*point)
-                && !self.foods.iter().any(|food| food.point == *point)
+            self.is_inside(*point) && !self.is_occupied(*point) && !self.is_foods_occupied(*point)
         })
     }
 
@@ -562,27 +665,26 @@ impl GameSnake {
         true
     }
 
-    /// 在任意空位上随机生成一个食物。
-    fn spawn_food(&mut self) {
-        if self.foods.len() >= FOOD_COUNT {
-            return;
-        }
-        let mut empty_points = Vec::new();
-        for y in 0..self.size.height as i16 {
-            for x in 0..self.size.width as i16 {
-                let point = Point { x, y };
-                if self.is_occupied(point) || self.foods.iter().any(|food| food.point == point) {
-                    continue;
+    /// 将常规食物补到目标数量，不受尸块食物数量影响。
+    fn spawn_foods(&mut self) {
+        while self.normal_food_count() < FOOD_COUNT {
+            let mut empty_points = Vec::new();
+            for y in 0..self.size.height as i16 {
+                for x in 0..self.size.width as i16 {
+                    let point = Point { x, y };
+                    if self.is_occupied(point) || self.is_foods_occupied(point) {
+                        continue;
+                    }
+                    empty_points.push(point);
                 }
-                empty_points.push(point);
             }
+            if empty_points.is_empty() {
+                return;
+            }
+            let mut rng = rand::rng();
+            let index = rng.random_range(0..empty_points.len());
+            self.foods.push(Food::new(empty_points.swap_remove(index)));
         }
-        if empty_points.is_empty() {
-            return;
-        }
-        let mut rng = rand::rng();
-        let index = rng.random_range(0..empty_points.len());
-        self.foods.push(Food::new(empty_points.swap_remove(index)));
     }
 
     // update
@@ -594,9 +696,10 @@ impl GameSnake {
     /// 2. 再判断是否撞到自己。这里不会一刀切地检查整条身体，
     ///    而是先根据这一步是否会增长，算出移动后仍然保留的身体长度。
     ///    如果这一步不会增长，尾巴会同步前移，所以允许蛇头落到“当前尾巴所在格”。
-    /// 3. 最后判断是否撞到其他蛇。这里直接传入“自己”和“其他蛇”，
+    /// 3. 接着判断是否撞到其他仍然存活的蛇。这里直接传入“自己”和“其他蛇”，
     ///    这样调用方可以明确地决定当前这次移动到底要检查哪些对象。
-    fn hits_obstacle(
+    /// 4. 最后判断是否撞到棋盘上还没转成食物的尸块。
+    fn is_next_obstacle(
         &self,
         snake: &Snake,
         other_snakes: &[&Snake],
@@ -606,20 +709,26 @@ impl GameSnake {
         if !self.is_inside(next_head) {
             return true;
         }
+        // 判断是否撞到自己。
         let body_len = snake.body_len_after_move(ate_food);
         if snake.body[..body_len].contains(&next_head) {
             return true;
         }
+        // 判断是否撞到其他蛇。
         for other_snake in other_snakes {
             if other_snake.contains(next_head) {
                 return true;
             }
         }
+        // 判断是否撞到尸块。
+        if self.is_corpse_occupied(next_head) {
+            return true;
+        }
         false
     }
 
     /// 判断一个落点是否属于“虽然不撞，但最好避开”的风险位置。
-    fn is_risky_next_head(&self, next_head: Point, other_snakes: &[&Snake]) -> bool {
+    fn is_next_risky(&self, next_head: Point, other_snakes: &[&Snake]) -> bool {
         other_snakes.iter().any(|other_snake| {
             if !other_snake.is_alive() {
                 return false;
@@ -635,7 +744,7 @@ impl GameSnake {
     ///
     /// 这里会优先返回“不撞且不紧跟其他蛇尾巴、也不贴近其他蛇头”的方向；
     /// 如果这样的方向一个都没有，再退回到一般意义上的安全方向。
-    fn get_snake_safe_directions(&self, slot: SnakeSlot) -> Vec<Direction> {
+    fn get_snake_directions(&self, slot: SnakeSlot) -> Vec<Direction> {
         let snake = self.snake(slot);
         let other_snakes = match slot {
             SnakeSlot::Player => self.snakes.iter().collect::<Vec<_>>(),
@@ -663,11 +772,11 @@ impl GameSnake {
             }
             let next_head = snake.head().step(direction);
             let ate_food = self.foods.iter().any(|food| food.point == next_head);
-            if self.hits_obstacle(snake, &other_snakes, next_head, ate_food) {
+            if self.is_next_obstacle(snake, &other_snakes, next_head, ate_food) {
                 continue;
             }
             safe_directions.push(direction);
-            if !self.is_risky_next_head(next_head, &other_snakes) {
+            if !self.is_next_risky(next_head, &other_snakes) {
                 preferred_directions.push(direction);
             }
         }
@@ -702,7 +811,7 @@ impl GameSnake {
         }
 
         // 先筛出不会立刻撞墙或撞到其他蛇的安全方向。
-        let mut directions = self.get_snake_safe_directions(slot);
+        let mut directions = self.get_snake_directions(slot);
         if directions.is_empty() {
             return;
         }
@@ -746,7 +855,7 @@ impl GameSnake {
         let blocked = match slot {
             SnakeSlot::Player => {
                 let other_snakes = self.snakes.iter().collect::<Vec<_>>();
-                self.hits_obstacle(&self.player, &other_snakes, next_head, ate_food)
+                self.is_next_obstacle(&self.player, &other_snakes, next_head, ate_food)
             }
             SnakeSlot::Enemy(snake_index) => {
                 let snake = &self.snakes[snake_index];
@@ -757,7 +866,7 @@ impl GameSnake {
                         other_snakes.push(other_snake);
                     }
                 }
-                self.hits_obstacle(snake, &other_snakes, next_head, ate_food)
+                self.is_next_obstacle(snake, &other_snakes, next_head, ate_food)
             }
         };
         if blocked {
@@ -771,6 +880,12 @@ impl GameSnake {
         false
     }
 
+    /// 将一条敌蛇转成尸块，并开始后续的尸块动画。
+    fn kill_snake(&mut self, snake_index: usize) {
+        let corpses = self.snakes[snake_index].die(DEAD_WAIT_STEPS);
+        self.corpses.extend(corpses);
+    }
+
     /// 推进玩家蛇的一次移动。
     fn update_player(&mut self) {
         self.update_snake_direction(SnakeSlot::Player);
@@ -782,18 +897,37 @@ impl GameSnake {
     /// 推进所有 AI 蛇的一次移动。
     fn update_snakes(&mut self) {
         for snake_index in 0..self.snakes.len() {
-            let slot = SnakeSlot::Enemy(snake_index);
-            if !self.snakes[snake_index].is_alive() {
-                if self.snakes[snake_index].tick_dead() {
+            match self.snakes[snake_index].state {
+                SnakeState::Idle => {
                     self.spawn_snake(snake_index);
                 }
-                continue;
-            }
-            self.update_snake_direction(slot);
-            if self.advance_snake(slot) {
-                self.snakes[snake_index].mark_dead();
+                SnakeState::Dead { .. } => {
+                    if self.snakes[snake_index].tick_dead_wait() {
+                        self.spawn_snake(snake_index);
+                    }
+                }
+                SnakeState::Alive => {
+                    self.update_snake_direction(SnakeSlot::Enemy(snake_index));
+                    if self.advance_snake(SnakeSlot::Enemy(snake_index)) {
+                        self.kill_snake(snake_index);
+                    }
+                }
             }
         }
+    }
+
+    /// 推进所有尸块的动画和转食物逻辑。
+    fn update_corpses(&mut self) {
+        let mut remaining_corpses = Vec::with_capacity(self.corpses.len());
+        for mut corpse in self.corpses.drain(..) {
+            if corpse.tick() {
+                self.foods
+                    .push(Food::from_corpse(corpse.point, corpse.color));
+            } else {
+                remaining_corpses.push(corpse);
+            }
+        }
+        self.corpses = remaining_corpses;
     }
 
     // render
@@ -805,6 +939,13 @@ impl GameSnake {
         if let Some(food) = self.foods.iter().find(|food| food.point == point) {
             symbol = food.symbol;
             color = food.color;
+        }
+        for corpse in &self.corpses {
+            if let Some((corpse_symbol, corpse_color)) = corpse.cell(point) {
+                symbol = corpse_symbol;
+                color = corpse_color;
+                break;
+            }
         }
         for snake in &self.snakes {
             if snake.body_contains(point) {
@@ -843,9 +984,10 @@ impl Game for GameSnake {
             return;
         }
         self.frame = 0;
+        self.update_corpses();
         self.update_snakes();
         self.update_player();
-        self.spawn_food();
+        self.spawn_foods();
     }
 
     /// 返回贪吃蛇游戏当前状态。
