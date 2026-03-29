@@ -440,7 +440,7 @@ impl GameSnake {
 
     /// helper
 
-    /// 判断给定位置是否被任意不可食物体占用。
+    /// 判断给定位置是否被任意非食物物体占用。
     fn is_occupied(&self, point: Point) -> bool {
         self.is_player_occupied(point)
             || self.is_snakes_occupied(point)
@@ -467,7 +467,7 @@ impl GameSnake {
         self.corpses.iter().any(|corpse| corpse.contains(point))
     }
 
-    /// 判断给定位置是否被任意食物食物体占用。
+    /// 判断给定位置是否被任意食物占用。
     fn is_foods_occupied(&self, point: Point) -> bool {
         self.foods.iter().any(|food| food.point == point)
     }
