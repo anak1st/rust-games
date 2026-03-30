@@ -1,11 +1,14 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use rand::RngExt;
 use ratatui::{
-    style::{Color, Style, Stylize},
-    text::{Line, Span, Text},
+    style::{Color, Stylize},
+    text::{Line, Text},
 };
 
-use crate::game::{Direction, Game, GameSize, GameStatus, Instruction, Point};
+use crate::game::{
+    Direction, EMPTY_SYMBOL, Game, GameSize, GameStatus, Instruction, Point, RenderBuffer,
+    Renderable,
+};
 
 const INSTRUCTIONS: [Instruction; 2] = [
     Instruction {
@@ -27,7 +30,6 @@ const DEAD_WAIT_STEPS: usize = 10;
 const AI_ROAM_CHANCE_PERCENT: usize = 4;
 const AI_ROAM_STEPS: usize = 4;
 const SUPER_FOOD_CHANCE_DENOMINATOR: usize = 4;
-const EMPTY_SYMBOL: &str = ".";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FoodKind {
@@ -79,19 +81,22 @@ impl Food {
         matches!(self.kind, FoodKind::Normal | FoodKind::Super)
     }
 
-    /// 返回给定位置上的食物渲染信息。
-    fn render(&self, point: Point, frame: usize) -> Option<(&'static str, Color)> {
-        if self.point != point {
-            return None;
-        }
+    /// 返回当前帧下应显示的颜色。
+    fn color_at_frame(&self, frame: usize) -> Color {
         if matches!(self.kind, FoodKind::Corpse | FoodKind::Normal) {
-            return Some((self.symbol, self.color));
+            return self.color;
         }
         if frame % 10 <= 4 {
-            Some((self.symbol, self.color))
+            self.color
         } else {
-            Some((self.symbol, Color::White))
+            Color::White
         }
+    }
+}
+
+impl Renderable for Food {
+    fn render(&self, buffer: &mut RenderBuffer, frame: usize) {
+        buffer.set(self.point, self.symbol, self.color_at_frame(frame));
     }
 }
 
@@ -117,14 +122,11 @@ impl Corpse {
         self.food_remaining -= 1;
         false
     }
+}
 
-    /// 返回给定位置上的尸块渲染信息。
-    fn render(&self, point: Point) -> Option<(&'static str, Color)> {
-        if self.point == point {
-            Some((self.symbol, self.color))
-        } else {
-            None
-        }
+impl Renderable for Corpse {
+    fn render(&self, buffer: &mut RenderBuffer, _frame: usize) {
+        buffer.set(self.point, self.symbol, self.color);
     }
 }
 
@@ -287,16 +289,6 @@ impl Snake {
         self.is_alive() && self.body.contains(&point)
     }
 
-    /// 判断给定位置是否被蛇头占用。
-    fn head_contains(&self, point: Point) -> bool {
-        self.is_alive() && self.head() == point
-    }
-
-    /// 判断给定位置是否被蛇身占用。
-    fn body_contains(&self, point: Point) -> bool {
-        self.is_alive() && self.body.len() > 1 && self.body[1..].contains(&point)
-    }
-
     /// 更新蛇当前的移动方向。
     fn set_direction(&mut self, direction: Direction) {
         self.direction = direction;
@@ -392,15 +384,19 @@ impl Snake {
             *state = SnakeAiState::default();
         }
     }
+}
 
-    /// 返回蛇定位置上的渲染信息。
-    fn render(&self, point: Point) -> Option<(&'static str, Color)> {
-        if self.head_contains(point) {
-            Some((self.head_symbol, self.head_color))
-        } else if self.body_contains(point) {
-            Some((self.body_symbol, self.body_color))
-        } else {
-            None
+impl Renderable for Snake {
+    fn render(&self, buffer: &mut RenderBuffer, _frame: usize) {
+        if !self.is_alive() {
+            return;
+        }
+        for (index, point) in self.body.iter().enumerate() {
+            if index == 0 {
+                buffer.set(*point, self.head_symbol, self.head_color);
+            } else {
+                buffer.set(*point, self.body_symbol, self.body_color);
+            }
         }
     }
 }
@@ -419,7 +415,7 @@ pub struct GameSnake {
     snakes: Vec<Snake>,
     corpses: Vec<Corpse>,
     foods: Vec<Food>,
-    symbols: Vec<Vec<&'static str>>,
+    buffer: RenderBuffer,
     frame: usize,
 }
 
@@ -434,7 +430,7 @@ impl GameSnake {
                 snakes: vec![],
                 corpses: vec![],
                 foods: vec![],
-                symbols: vec![],
+                buffer: RenderBuffer::new(size),
                 frame: 0,
             };
         }
@@ -445,7 +441,7 @@ impl GameSnake {
             snakes: vec![],
             corpses: vec![],
             foods: vec![],
-            symbols: vec![vec![EMPTY_SYMBOL; size.width as usize]; size.height as usize],
+            buffer: RenderBuffer::new(size),
             frame: 0,
         };
         for index in 0..AI_COUNT {
@@ -710,6 +706,49 @@ impl GameSnake {
 
     // update
 
+    /// 估算蛇前进一步后，从新蛇头出发还能到达多少空位。
+    fn reachable_space_after_move(&self, next_head: Point, limit: usize) -> usize {
+        let mut visited = vec![vec![false; self.size.width as usize]; self.size.height as usize];
+        let mut stack = vec![next_head];
+        let mut reachable = 0;
+        visited[next_head.y as usize][next_head.x as usize] = true;
+        while let Some(point) = stack.pop() {
+            reachable += 1;
+            if reachable > limit {
+                return reachable;
+            }
+            for direction in [
+                Direction::Up,
+                Direction::Down,
+                Direction::Left,
+                Direction::Right,
+            ] {
+                let next_point = point.step(direction);
+                if !self.is_inside(next_point) {
+                    continue;
+                }
+                let y = next_point.y as usize;
+                let x = next_point.x as usize;
+                if visited[y][x] {
+                    continue;
+                }
+                if !matches!(
+                    self.buffer.symbol_at(Point {
+                        x: next_point.x,
+                        y: next_point.y,
+                    }),
+                    EMPTY_SYMBOL | "*" | "$"
+                ) {
+                    continue;
+                }
+                visited[y][x] = true;
+                stack.push(next_point);
+            }
+        }
+
+        reachable
+    }
+
     /// 判断一条蛇移动到目标位置后是否会失败。
     ///
     /// 判断顺序如下：
@@ -746,43 +785,6 @@ impl GameSnake {
             return true;
         }
         false
-    }
-
-    /// 估算蛇前进一步后，从新蛇头出发还能到达多少空位。
-    fn reachable_space_after_move(&self, next_head: Point, limit: usize) -> usize {
-        let mut visited = vec![vec![false; self.size.width as usize]; self.size.height as usize];
-        let mut stack = vec![next_head];
-        let mut reachable = 0;
-        visited[next_head.y as usize][next_head.x as usize] = true;
-        while let Some(point) = stack.pop() {
-            reachable += 1;
-            if reachable > limit {
-                return reachable;
-            }
-            for direction in [
-                Direction::Up,
-                Direction::Down,
-                Direction::Left,
-                Direction::Right,
-            ] {
-                let next_point = point.step(direction);
-                if !self.is_inside(next_point) {
-                    continue;
-                }
-                let y = next_point.y as usize;
-                let x = next_point.x as usize;
-                if visited[y][x] {
-                    continue;
-                }
-                if !matches!(self.symbols[y][x], EMPTY_SYMBOL | "*" | "$") {
-                    continue;
-                }
-                visited[y][x] = true;
-                stack.push(next_point);
-            }
-        }
-
-        reachable
     }
 
     /// 判断一个落点是否属于“虽然不撞，但最好避开”的风险位置。
@@ -993,70 +995,19 @@ impl GameSnake {
         self.update_symbols();
     }
 
-    /// 按当前状态重建一份仅包含符号的棋盘快照。
+    /// 按当前状态重建一份带颜色的棋盘缓存。
     fn update_symbols(&mut self) {
-        self.symbols = vec![vec![EMPTY_SYMBOL; self.size.width]; self.size.height];
+        self.buffer.clear();
         for food in &self.foods {
-            self.symbols[food.point.y as usize][food.point.x as usize] = food.symbol;
+            food.render(&mut self.buffer, self.frame);
         }
         for corpse in &self.corpses {
-            self.symbols[corpse.point.y as usize][corpse.point.x as usize] = corpse.symbol;
+            corpse.render(&mut self.buffer, self.frame);
         }
         for snake in &self.snakes {
-            if !snake.is_alive() {
-                continue;
-            }
-            for (index, point) in snake.body.iter().enumerate() {
-                self.symbols[point.y as usize][point.x as usize] = if index == 0 {
-                    snake.head_symbol
-                } else {
-                    snake.body_symbol
-                };
-            }
+            snake.render(&mut self.buffer, self.frame);
         }
-        if self.player.is_alive() {
-            for (index, point) in self.player.body.iter().enumerate() {
-                self.symbols[point.y as usize][point.x as usize] = if index == 0 {
-                    self.player.head_symbol
-                } else {
-                    self.player.body_symbol
-                };
-            }
-        }
-    }
-
-    // render
-
-    /// 渲染一个棋盘格子。
-    fn render_cell(&self, point: Point) -> Span<'static> {
-        let mut symbol = ".";
-        let mut color = Color::DarkGray;
-        for food in &self.foods {
-            if let Some((symbol_symbol, symbol_color)) = food.render(point, self.frame) {
-                symbol = symbol_symbol;
-                color = symbol_color;
-                break;
-            }
-        }
-        for corpse in &self.corpses {
-            if let Some((corpse_symbol, corpse_color)) = corpse.render(point) {
-                symbol = corpse_symbol;
-                color = corpse_color;
-                break;
-            }
-        }
-        for snake in &self.snakes {
-            if let Some((symbol_symbol, symbol_color)) = snake.render(point) {
-                symbol = symbol_symbol;
-                color = symbol_color;
-                break;
-            }
-        }
-        if let Some((symbol_symbol, symbol_color)) = self.player.render(point) {
-            symbol = symbol_symbol;
-            color = symbol_color;
-        }
-        Span::styled(symbol, Style::new().fg(color))
+        self.player.render(&mut self.buffer, self.frame);
     }
 }
 
@@ -1087,15 +1038,7 @@ impl Game for GameSnake {
         if self.status == GameStatus::WindowTooSmall {
             return Text::from("贪吃蛇区域太小");
         }
-        let mut lines = Vec::with_capacity(self.size.height);
-        for y in 0..self.size.height as isize {
-            let mut spans = Vec::with_capacity(self.size.width);
-            for x in 0..self.size.width as isize {
-                spans.push(self.render_cell(Point { x, y }));
-            }
-            lines.push(Line::from(spans));
-        }
-        Text::from(lines)
+        self.buffer.to_text()
     }
 
     /// 渲染贪吃蛇游戏的状态区域。

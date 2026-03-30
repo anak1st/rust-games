@@ -6,7 +6,10 @@ use std::fmt::Debug;
 use clap::ValueEnum;
 use crossterm::event::KeyEvent;
 use ratatui::style::{Color, Style};
-use ratatui::text::Text;
+use ratatui::text::{Line, Span, Text};
+
+pub const EMPTY_SYMBOL: &str = ".";
+pub const EMPTY_COLOR: Color = Color::DarkGray;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Point {
@@ -84,6 +87,80 @@ pub struct Instruction {
 pub struct GameSize {
     pub width: usize,
     pub height: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RenderCell {
+    pub symbol: &'static str,
+    pub color: Color,
+}
+
+impl RenderCell {
+    pub const fn empty() -> Self {
+        Self {
+            symbol: EMPTY_SYMBOL,
+            color: EMPTY_COLOR,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct RenderBuffer {
+    cells: Vec<Vec<RenderCell>>,
+}
+
+impl RenderBuffer {
+    pub fn new(size: GameSize) -> Self {
+        Self {
+            cells: vec![vec![RenderCell::empty(); size.width]; size.height],
+        }
+    }
+
+    pub fn clear(&mut self) {
+        for row in &mut self.cells {
+            row.fill(RenderCell::empty());
+        }
+    }
+
+    pub fn set(&mut self, point: Point, symbol: &'static str, color: Color) {
+        if point.x < 0 || point.y < 0 {
+            return;
+        }
+        let Some(row) = self.cells.get_mut(point.y as usize) else {
+            return;
+        };
+        let Some(cell) = row.get_mut(point.x as usize) else {
+            return;
+        };
+        *cell = RenderCell { symbol, color };
+    }
+
+    pub fn symbol_at(&self, point: Point) -> &'static str {
+        if point.x < 0 || point.y < 0 {
+            return EMPTY_SYMBOL;
+        }
+        self.cells
+            .get(point.y as usize)
+            .and_then(|row| row.get(point.x as usize))
+            .map(|cell| cell.symbol)
+            .unwrap_or(EMPTY_SYMBOL)
+    }
+
+    pub fn to_text(&self) -> Text<'static> {
+        let mut lines = Vec::with_capacity(self.cells.len());
+        for row in &self.cells {
+            let spans: Vec<_> = row
+                .iter()
+                .map(|cell| Span::styled(cell.symbol, Style::new().fg(cell.color)))
+                .collect();
+            lines.push(Line::from(spans));
+        }
+        Text::from(lines)
+    }
+}
+
+pub trait Renderable {
+    fn render(&self, buffer: &mut RenderBuffer, frame: usize);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
