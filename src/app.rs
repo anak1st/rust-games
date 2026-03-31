@@ -16,14 +16,15 @@ use ratatui::{
 
 use crate::game::{
     GAMES, Game, GameKind, GameSize, GameStatus, Instruction, counter::GameCounter,
-    snake::GameSnake,
+    snake::GameSnake, tetris::GameTetris,
 };
 
 const TITLE_HEIGHT: u16 = 3;
 const FOOTER_HEIGHT: u16 = 3;
 const STATUS_WIDTH: u16 = 24;
+const GAME_BORDER_SIZE: u16 = 2;
 const GAME_MIN_WIDTH: u16 = 32;
-const GAME_MIN_HEIGHT: u16 = 24;
+const GAME_MIN_HEIGHT: u16 = 22;
 const UPDATE_INTERVAL: Duration = Duration::from_millis(33);
 
 /// 读取当前终端尺寸并换算出游戏内容区大小。
@@ -36,15 +37,15 @@ fn current_game_size() -> Option<GameSize> {
 
 /// 根据终端宽高计算游戏内容区大小。
 fn calculate_game_size(width: u16, height: u16) -> Option<GameSize> {
-    if width <= STATUS_WIDTH + 2 + GAME_MIN_WIDTH {
+    if width < STATUS_WIDTH + GAME_BORDER_SIZE + GAME_MIN_WIDTH {
         return None;
     }
-    if height <= TITLE_HEIGHT + FOOTER_HEIGHT + GAME_MIN_HEIGHT {
+    if height < TITLE_HEIGHT + FOOTER_HEIGHT + GAME_BORDER_SIZE + GAME_MIN_HEIGHT {
         return None;
     }
     Some(GameSize {
-        width: (width - STATUS_WIDTH - 2) as usize,
-        height: (height - TITLE_HEIGHT - FOOTER_HEIGHT - 2) as usize,
+        width: (width - STATUS_WIDTH - GAME_BORDER_SIZE) as usize,
+        height: (height - TITLE_HEIGHT - FOOTER_HEIGHT - GAME_BORDER_SIZE) as usize,
     })
 }
 
@@ -146,6 +147,7 @@ impl App {
         self.game = Some(match game {
             GameKind::Counter => Box::new(GameCounter::new(size)),
             GameKind::Snake => Box::new(GameSnake::new(size)),
+            GameKind::Tetris => Box::new(GameTetris::new(size)),
         });
         self.game_size = game_size;
         self.game_status = if game_size.is_some() {

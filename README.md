@@ -2,10 +2,11 @@
 
 一个用 Rust 编写的 `ratatui` 终端游戏练习项目。
 
-当前仓库包含两个游戏：
+当前仓库包含三个游戏：
 
 - 计数器
 - 贪吃蛇
+- 俄罗斯方块
 
 其中贪吃蛇已经包含这些机制：
 
@@ -27,6 +28,7 @@ cargo run
 ```bash
 cargo run -- --game counter
 cargo run -- --game snake
+cargo run -- --game tetris
 ```
 
 ## 控制
@@ -48,6 +50,16 @@ cargo run -- --game snake
 
 - `Arrows` / `WASD` 控制方向
 - `i` 在手动和 AI 控制之间切换
+- `Space` 暂停或继续
+- `r` 重开
+- `q` / `Esc` 返回主界面
+
+俄罗斯方块：
+
+- `Left/Right` 或 `A/D` 左右移动
+- `Up` / `W` / `X` 顺时针旋转
+- `Down` / `S` 软降
+- `Enter` 硬降
 - `Space` 暂停或继续
 - `r` 重开
 - `q` / `Esc` 返回主界面

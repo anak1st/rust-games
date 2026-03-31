@@ -1,5 +1,6 @@
 pub mod counter;
 pub mod snake;
+pub mod tetris;
 
 use std::fmt::Debug;
 
@@ -196,7 +197,7 @@ impl GameStatus {
         let color = match self {
             GameStatus::Idle => Color::Gray,
             GameStatus::Main => Color::Cyan,
-            GameStatus::Ready => Color::LightGreen,
+            GameStatus::Ready => Color::Cyan,
             GameStatus::Running => Color::Green,
             GameStatus::Paused => Color::Yellow,
             GameStatus::Won => Color::Green,
@@ -211,6 +212,7 @@ impl GameStatus {
 pub enum GameKind {
     Counter,
     Snake,
+    Tetris,
 }
 
 impl GameKind {
@@ -219,11 +221,12 @@ impl GameKind {
         match self {
             GameKind::Counter => "计数器",
             GameKind::Snake => "贪吃蛇",
+            GameKind::Tetris => "俄罗斯方块",
         }
     }
 }
 
-pub const GAMES: [GameKind; 2] = [GameKind::Counter, GameKind::Snake];
+pub const GAMES: [GameKind; 3] = [GameKind::Counter, GameKind::Snake, GameKind::Tetris];
 
 /// 可嵌入应用外壳中的游戏所需遵循的最小约定。
 pub trait Game: Debug {
