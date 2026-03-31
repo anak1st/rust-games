@@ -14,7 +14,7 @@ const INSTRUCTIONS: [Instruction; 4] = [
     },
     Instruction {
         label: " 旋转 ",
-        key: "<Up/W/X>",
+        key: "<Up/W>",
     },
     Instruction {
         label: " 软降 ",
@@ -501,6 +501,16 @@ impl GameTetris {
         false
     }
 
+    /// 尝试沿活动方块向左移动一格。
+    fn try_move_left(&mut self) -> bool {
+        self.try_move_active(-1, 0)
+    }
+
+    /// 尝试沿活动方块向右移动一格。
+    fn try_move_right(&mut self) -> bool {
+        self.try_move_active(1, 0)
+    }
+
     /// 让活动方块向下移动一格，无法下落时立即锁定。
     fn soft_drop(&mut self) {
         if self.try_move_active(0, 1) {
@@ -735,18 +745,14 @@ impl Game for GameTetris {
     /// 处理俄罗斯方块的操作输入。
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         match key_event.code {
-            KeyCode::Left | KeyCode::Char('a') | KeyCode::Char('A') => {
-                self.try_move_active(-1, 0);
+            KeyCode::Left | KeyCode::Char('a') => {
+                self.try_move_left();
             }
-            KeyCode::Right | KeyCode::Char('d') | KeyCode::Char('D') => {
-                self.try_move_active(1, 0);
+            KeyCode::Right | KeyCode::Char('d') => {
+                self.try_move_right();
             }
-            KeyCode::Down | KeyCode::Char('s') | KeyCode::Char('S') => self.soft_drop(),
-            KeyCode::Up
-            | KeyCode::Char('w')
-            | KeyCode::Char('W')
-            | KeyCode::Char('x')
-            | KeyCode::Char('X') => {
+            KeyCode::Down | KeyCode::Char('s') => self.soft_drop(),
+            KeyCode::Up | KeyCode::Char('w') => {
                 self.try_rotate_active();
             }
             KeyCode::Enter => self.hard_drop(),

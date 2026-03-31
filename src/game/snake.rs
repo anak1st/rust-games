@@ -948,6 +948,16 @@ impl GameSnake {
         self.corpses.extend(corpses);
     }
 
+    fn try_set_player_direction(&mut self, next_direction: Direction) {
+        if !self.player.controller().accepts_manual_input() {
+            return;
+        }
+        if next_direction.is_opposite(self.player.direction) {
+            return;
+        }
+        self.player.set_direction(next_direction);
+    }
+
     /// 推进玩家蛇的一次移动。
     fn update_player(&mut self) {
         self.update_snake_direction(SnakeSlot::Player);
@@ -1106,15 +1116,8 @@ impl Game for GameSnake {
             KeyCode::Right | KeyCode::Char('d') => Some(Direction::Right),
             _ => None,
         };
-        let Some(next_direction) = next_direction else {
-            return;
-        };
-        if !self.player.controller().accepts_manual_input() {
-            return;
+        if let Some(next_direction) = next_direction {
+            self.try_set_player_direction(next_direction);
         }
-        if next_direction.is_opposite(self.player.direction) {
-            return;
-        }
-        self.player.set_direction(next_direction);
     }
 }

@@ -57,7 +57,7 @@ cargo run -- --game tetris
 俄罗斯方块：
 
 - `Left/Right` 或 `A/D` 左右移动
-- `Up` / `W` / `X` 顺时针旋转
+- `Up` / `W` 顺时针旋转
 - `Down` / `S` 软降
 - `Enter` 硬降
 - `Space` 暂停或继续
