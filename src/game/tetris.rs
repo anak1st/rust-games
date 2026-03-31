@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use rand::RngExt;
 use ratatui::{
     style::{Color, Stylize},
-    text::{Line, Text},
+    text::{Line, Span, Text},
 };
 
 use crate::game::{Game, GameSize, GameStatus, Instruction, Point, RenderBuffer};
@@ -32,6 +32,7 @@ const BOARD_RENDER_WIDTH: usize = BOARD_WIDTH + 2;
 const BOARD_RENDER_HEIGHT: usize = BOARD_HEIGHT + 2;
 const MIN_WIDTH: usize = BOARD_RENDER_WIDTH;
 const MIN_HEIGHT: usize = BOARD_RENDER_HEIGHT;
+const PREVIEW_SIZE: usize = 4;
 const BASE_DROP_INTERVAL: usize = 18;
 const MIN_DROP_INTERVAL: usize = 4;
 const SIMPLE_KICKS: [Point; 6] = [
@@ -500,6 +501,15 @@ impl GameTetris {
         false
     }
 
+    /// 让活动方块向下移动一格，无法下落时立即锁定。
+    fn soft_drop(&mut self) {
+        if self.try_move_active(0, 1) {
+            self.score += 1;
+            return;
+        }
+        self.lock_active();
+    }
+
     /// 将活动方块一路下落到底部并立即锁定。
     fn hard_drop(&mut self) {
         let Some(active) = self.active else {
@@ -630,9 +640,41 @@ impl GameTetris {
         }
     }
 
-    /// 返回当前活动方块的展示名称。
-    fn active_name(&self) -> &'static str {
-        self.active.map(|piece| piece.kind.name()).unwrap_or("-")
+    /// 返回一个方块预览区域的文本行。
+    fn piece_preview_lines(
+        label: &'static str,
+        kind: Tetromino,
+        rotation: Rotation,
+    ) -> Vec<Line<'static>> {
+        let mut preview = [[false; PREVIEW_SIZE]; PREVIEW_SIZE];
+        for point in kind.cells(rotation) {
+            if point.x < 0 || point.y < 0 {
+                continue;
+            }
+            let x = point.x as usize;
+            let y = point.y as usize;
+            if x >= PREVIEW_SIZE || y >= PREVIEW_SIZE {
+                continue;
+            }
+            preview[y][x] = true;
+        }
+
+        let mut lines = Vec::with_capacity(PREVIEW_SIZE + 1);
+        lines.push(Line::from(vec![label.into(), kind.name().fg(kind.color())]));
+        for row in preview {
+            let spans: Vec<_> = row
+                .into_iter()
+                .map(|filled| {
+                    if filled {
+                        Span::styled(kind.symbol(), kind.color())
+                    } else {
+                        Span::styled(".", Color::DarkGray)
+                    }
+                })
+                .collect();
+            lines.push(Line::from(spans));
+        }
+        lines
     }
 }
 
@@ -664,21 +706,11 @@ impl Game for GameTetris {
 
     /// 渲染俄罗斯方块的状态区域。
     fn render_status(&self) -> Text<'static> {
-        Text::from(vec![
+        let mut lines = Self::piece_preview_lines("下一个: ", self.next, Rotation::R0);
+        lines.extend([
             Line::from(vec!["分数: ".into(), self.score.to_string().yellow()]),
             Line::from(vec!["行数: ".into(), self.lines.to_string().green()]),
             Line::from(vec!["等级: ".into(), self.level.to_string().cyan()]),
-            Line::from(vec![
-                "当前块: ".into(),
-                self.active_name().fg(self
-                    .active
-                    .map(|piece| piece.kind.color())
-                    .unwrap_or(Color::Gray)),
-            ]),
-            Line::from(vec![
-                "下一个: ".into(),
-                self.next.name().fg(self.next.color()),
-            ]),
             Line::from(vec![
                 "棋盘: ".into(),
                 format!("{BOARD_WIDTH} x {BOARD_HEIGHT}").into(),
@@ -691,7 +723,8 @@ impl Game for GameTetris {
                 "尺寸: ".into(),
                 format!("{} x {}", self.size.width, self.size.height).into(),
             ]),
-        ])
+        ]);
+        Text::from(lines)
     }
 
     /// 返回俄罗斯方块的帮助说明。
@@ -708,13 +741,7 @@ impl Game for GameTetris {
             KeyCode::Right | KeyCode::Char('d') | KeyCode::Char('D') => {
                 self.try_move_active(1, 0);
             }
-            KeyCode::Down | KeyCode::Char('s') | KeyCode::Char('S') => {
-                if self.try_move_active(0, 1) {
-                    self.score += 1;
-                } else {
-                    self.lock_active();
-                }
-            }
+            KeyCode::Down | KeyCode::Char('s') | KeyCode::Char('S') => self.soft_drop(),
             KeyCode::Up
             | KeyCode::Char('w')
             | KeyCode::Char('W')
@@ -723,7 +750,7 @@ impl Game for GameTetris {
                 self.try_rotate_active();
             }
             KeyCode::Enter => self.hard_drop(),
-            _ => {}
+            _ => return,
         }
         self.update_symbols();
     }
