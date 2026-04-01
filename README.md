@@ -8,6 +8,9 @@
 - 贪吃蛇
 - 俄罗斯方块
 
+![image1](./docs/image1.png)
+![image2](./docs/image2.png)
+
 其中贪吃蛇已经包含这些机制：
 
 - 玩家手动控制
