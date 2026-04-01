@@ -130,6 +130,11 @@ impl App {
         self.exit = true;
     }
 
+    fn change_choose_game(&mut self, offset: isize) {
+        let len = GAMES.len() as isize;
+        self.game_index = ((self.game_index as isize + offset).rem_euclid(len)) as usize;
+    }
+
     /// 从当前游戏返回主界面。
     fn return_to_main(&mut self) {
         self.game_index = 0;
@@ -447,8 +452,8 @@ impl App {
     fn handle_main_keys(&mut self, key_event: KeyEvent) {
         match key_event.code {
             KeyCode::Char('q') => self.exit(),
-            KeyCode::Up => self.game_index = (self.game_index + 1) % GAMES.len(),
-            KeyCode::Down => self.game_index = (self.game_index + GAMES.len() - 1) % GAMES.len(),
+            KeyCode::Up => self.change_choose_game(-1),
+            KeyCode::Down => self.change_choose_game(1),
             KeyCode::Enter => self.start_game(),
             _ => {}
         }
