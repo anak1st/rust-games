@@ -1,13 +1,13 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use rand::RngExt;
 use ratatui::{
-    style::{Color, Stylize},
+    style::{Color, Style, Stylize},
     text::{Line, Text},
 };
 
 use crate::game::{
     Direction, EMPTY_SYMBOL, Game, GameSize, GameStatus, Instruction, Point, RenderBuffer,
-    Renderable,
+    RenderGlyph, RenderMode, Renderable,
 };
 
 const INSTRUCTIONS: [Instruction; 2] = [
@@ -42,7 +42,7 @@ enum FoodKind {
 struct Food {
     point: Point,
     growth: usize,
-    symbol: &'static str,
+    symbol: RenderGlyph,
     color: Color,
     kind: FoodKind,
 }
@@ -55,7 +55,11 @@ impl Food {
         Self {
             point,
             growth: if is_super { 4 } else { 1 },
-            symbol: if is_super { "$" } else { "*" },
+            symbol: if is_super {
+                RenderGlyph::new("$", "$$")
+            } else {
+                RenderGlyph::new("*", "**")
+            },
             color: Color::Yellow,
             kind: if is_super {
                 FoodKind::Super
@@ -70,7 +74,7 @@ impl Food {
         Self {
             point,
             growth: 1,
-            symbol: "*",
+            symbol: RenderGlyph::new("*", "**"),
             color,
             kind: FoodKind::Corpse,
         }
@@ -80,30 +84,25 @@ impl Food {
     fn is_spawned(self) -> bool {
         matches!(self.kind, FoodKind::Normal | FoodKind::Super)
     }
-
-    /// 返回当前帧下应显示的颜色。
-    fn color_at_frame(&self, frame: usize) -> Color {
-        if matches!(self.kind, FoodKind::Corpse | FoodKind::Normal) {
-            return self.color;
-        }
-        if frame % 10 <= 4 {
-            self.color
-        } else {
-            Color::White
-        }
-    }
 }
 
 impl Renderable for Food {
     fn render(&self, buffer: &mut RenderBuffer, frame: usize) {
-        buffer.set(self.point, self.symbol, self.color_at_frame(frame));
+        let color = if matches!(self.kind, FoodKind::Corpse | FoodKind::Normal) {
+            self.color
+        } else if frame % 10 <= 4 {
+            self.color
+        } else {
+            Color::White
+        };
+        buffer.set(self.point, self.symbol, Style::new().fg(color));
     }
 }
 
 #[derive(Debug)]
 struct Corpse {
     point: Point,
-    symbol: &'static str,
+    symbol: RenderGlyph,
     color: Color,
     food_remaining: usize,
 }
@@ -126,7 +125,7 @@ impl Corpse {
 
 impl Renderable for Corpse {
     fn render(&self, buffer: &mut RenderBuffer, _frame: usize) {
-        buffer.set(self.point, self.symbol, self.color);
+        buffer.set(self.point, self.symbol, Style::new().fg(self.color));
     }
 }
 
@@ -182,8 +181,8 @@ struct Snake {
     body: Vec<Point>,
     direction: Direction,
     controller: SnakeController,
-    head_symbol: &'static str,
-    body_symbol: &'static str,
+    head_symbol: RenderGlyph,
+    body_symbol: RenderGlyph,
     head_color: Color,
     body_color: Color,
     score: usize,
@@ -198,8 +197,8 @@ impl Snake {
             body,
             direction: Direction::Right,
             controller,
-            head_symbol: "@",
-            body_symbol: "o",
+            head_symbol: RenderGlyph::new("@", "@@"),
+            body_symbol: RenderGlyph::new("o", "oo"),
             head_color: Color::White,
             body_color: Color::White,
             score: 0,
@@ -211,18 +210,18 @@ impl Snake {
     /// 创建 AI 控制的蛇实例。
     fn new_ai(index: usize, body: Vec<Point>) -> Self {
         let head_symbol = match index {
-            0 => "A",
-            1 => "B",
-            2 => "C",
-            3 => "D",
-            _ => "Z",
+            0 => RenderGlyph::new("A", "AA"),
+            1 => RenderGlyph::new("B", "BB"),
+            2 => RenderGlyph::new("C", "CC"),
+            3 => RenderGlyph::new("D", "DD"),
+            _ => RenderGlyph::new("Z", "ZZ"),
         };
         let body_symbol = match index {
-            0 => "a",
-            1 => "b",
-            2 => "c",
-            3 => "d",
-            _ => "z",
+            0 => RenderGlyph::new("a", "aa"),
+            1 => RenderGlyph::new("b", "bb"),
+            2 => RenderGlyph::new("c", "cc"),
+            3 => RenderGlyph::new("d", "dd"),
+            _ => RenderGlyph::new("z", "zz"),
         };
         let (head_color, body_color) = match index {
             0 => (Color::Red, Color::Red),
@@ -393,9 +392,9 @@ impl Renderable for Snake {
         }
         for (index, point) in self.body.iter().enumerate() {
             if index == 0 {
-                buffer.set(*point, self.head_symbol, self.head_color);
+                buffer.set(*point, self.head_symbol, Style::new().fg(self.head_color));
             } else {
-                buffer.set(*point, self.body_symbol, self.body_color);
+                buffer.set(*point, self.body_symbol, Style::new().fg(self.body_color));
             }
         }
     }
@@ -421,7 +420,7 @@ pub struct GameSnake {
 
 impl GameSnake {
     /// 创建一个新的贪吃蛇游戏实例。
-    pub fn new(size: GameSize) -> Self {
+    pub fn new(size: GameSize, render_mode: RenderMode) -> Self {
         if size.width < MIN_WIDTH || size.height < MIN_HEIGHT {
             return Self {
                 size,
@@ -430,7 +429,7 @@ impl GameSnake {
                 snakes: vec![],
                 corpses: vec![],
                 foods: vec![],
-                buffer: RenderBuffer::new(size),
+                buffer: RenderBuffer::new(size, render_mode),
                 frame: 0,
             };
         }
@@ -441,7 +440,7 @@ impl GameSnake {
             snakes: vec![],
             corpses: vec![],
             foods: vec![],
-            buffer: RenderBuffer::new(size),
+            buffer: RenderBuffer::new(size, render_mode),
             frame: 0,
         };
         for index in 0..AI_COUNT {

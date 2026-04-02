@@ -34,6 +34,15 @@ cargo run -- --game snake
 cargo run -- --game tetris
 ```
 
+切换渲染宽度模式：
+
+```bash
+cargo run -- --render-mode single
+cargo run -- --render-mode double
+```
+
+默认使用 `double`，每个逻辑格子会输出双字符版本。
+
 ## 控制
 
 主界面：

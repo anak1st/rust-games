@@ -77,6 +77,7 @@ src/
 - 可以通过 `--game counter` 直接进入计数器游戏
 - 可以通过 `--game snake` 直接进入贪吃蛇游戏
 - 可以通过 `--game tetris` 直接进入俄罗斯方块游戏
+- 可以通过 `--render-mode single|double` 切换单字符或双字符渲染宽度
 
 ## 当前数据流
 

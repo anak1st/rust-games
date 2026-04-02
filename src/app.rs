@@ -15,7 +15,7 @@ use ratatui::{
 };
 
 use crate::game::{
-    GAMES, Game, GameKind, GameSize, GameStatus, Instruction, counter::GameCounter,
+    GAMES, Game, GameKind, GameSize, GameStatus, Instruction, RenderMode, counter::GameCounter,
     snake::GameSnake, tetris::GameTetris,
 };
 
@@ -23,28 +23,33 @@ const TITLE_HEIGHT: u16 = 3;
 const FOOTER_HEIGHT: u16 = 3;
 const STATUS_WIDTH: u16 = 24;
 const GAME_BORDER_SIZE: u16 = 2;
-const GAME_MIN_WIDTH: u16 = 32;
-const GAME_MIN_HEIGHT: u16 = 22;
+const GAME_MIN_WIDTH: u16 = 20;
+const GAME_MIN_HEIGHT: u16 = 20;
 const UPDATE_INTERVAL: Duration = Duration::from_millis(33);
 
 /// 读取当前终端尺寸并换算出游戏内容区大小。
-fn current_game_size() -> Option<GameSize> {
+fn current_game_size(render_mode: RenderMode) -> Option<GameSize> {
     let Ok((width, height)) = terminal::size() else {
         return None;
     };
-    calculate_game_size(width, height)
+    calculate_game_size(width, height, render_mode)
 }
 
 /// 根据终端宽高计算游戏内容区大小。
-fn calculate_game_size(width: u16, height: u16) -> Option<GameSize> {
+fn calculate_game_size(width: u16, height: u16, render_mode: RenderMode) -> Option<GameSize> {
     if width < STATUS_WIDTH + GAME_BORDER_SIZE + GAME_MIN_WIDTH {
         return None;
     }
     if height < TITLE_HEIGHT + FOOTER_HEIGHT + GAME_BORDER_SIZE + GAME_MIN_HEIGHT {
         return None;
     }
+    let available_width = (width - STATUS_WIDTH - GAME_BORDER_SIZE) as usize;
+    let logical_width = available_width / render_mode.cell_width();
+    if logical_width == 0 {
+        return None;
+    }
     Some(GameSize {
-        width: (width - STATUS_WIDTH - GAME_BORDER_SIZE) as usize,
+        width: logical_width,
         height: (height - TITLE_HEIGHT - FOOTER_HEIGHT - GAME_BORDER_SIZE) as usize,
     })
 }
@@ -90,12 +95,16 @@ pub struct App {
     game: Option<Box<dyn Game>>,
     game_size: Option<GameSize>,
     game_status: GameStatus,
+    render_mode: RenderMode,
 }
 
 impl App {
     /// 创建应用，并可选择直接进入某个游戏。
-    pub fn new(game: Option<GameKind>) -> Self {
-        let mut app = Self::default();
+    pub fn new(game: Option<GameKind>, render_mode: RenderMode) -> Self {
+        let mut app = Self {
+            render_mode,
+            ..Self::default()
+        };
         if let Some(game) = game {
             app.game_index = GAMES
                 .iter()
@@ -147,12 +156,12 @@ impl App {
     /// 打开所选游戏，并重置应用层的游戏状态。
     fn start_game(&mut self) {
         let game = GAMES[self.game_index];
-        let game_size = current_game_size();
+        let game_size = current_game_size(self.render_mode);
         let size = game_size.unwrap_or_default();
         self.game = Some(match game {
             GameKind::Counter => Box::new(GameCounter::new(size)),
-            GameKind::Snake => Box::new(GameSnake::new(size)),
-            GameKind::Tetris => Box::new(GameTetris::new(size)),
+            GameKind::Snake => Box::new(GameSnake::new(size, self.render_mode)),
+            GameKind::Tetris => Box::new(GameTetris::new(size, self.render_mode)),
         });
         self.game_size = game_size;
         self.game_status = if game_size.is_some() {
@@ -433,7 +442,7 @@ impl App {
         if self.screen != Screen::Game {
             return;
         }
-        let game_size = calculate_game_size(width, height);
+        let game_size = calculate_game_size(width, height, self.render_mode);
         if self.game_size == game_size {
             return;
         }

@@ -1,11 +1,13 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use rand::RngExt;
 use ratatui::{
-    style::{Color, Stylize},
+    style::{Color, Style, Stylize},
     text::{Line, Span, Text},
 };
 
-use crate::game::{Game, GameSize, GameStatus, Instruction, Point, RenderBuffer};
+use crate::game::{
+    Game, GameSize, GameStatus, Instruction, Point, RenderBuffer, RenderGlyph, RenderMode,
+};
 
 const INSTRUCTIONS: [Instruction; 4] = [
     Instruction {
@@ -28,10 +30,8 @@ const INSTRUCTIONS: [Instruction; 4] = [
 
 const BOARD_WIDTH: usize = 10;
 const BOARD_HEIGHT: usize = 20;
-const BOARD_RENDER_WIDTH: usize = BOARD_WIDTH + 2;
-const BOARD_RENDER_HEIGHT: usize = BOARD_HEIGHT + 2;
-const MIN_WIDTH: usize = BOARD_RENDER_WIDTH;
-const MIN_HEIGHT: usize = BOARD_RENDER_HEIGHT;
+const MIN_WIDTH: usize = BOARD_WIDTH;
+const MIN_HEIGHT: usize = BOARD_HEIGHT;
 const PREVIEW_SIZE: usize = 4;
 const BASE_DROP_INTERVAL: usize = 18;
 const MIN_DROP_INTERVAL: usize = 4;
@@ -90,8 +90,16 @@ impl Tetromino {
     }
 
     /// 返回当前方块在棋盘上显示的符号。
-    fn symbol(self) -> &'static str {
-        self.name()
+    fn glyph(self) -> RenderGlyph {
+        match self {
+            Tetromino::I => RenderGlyph::new("I", "II"),
+            Tetromino::O => RenderGlyph::new("O", "OO"),
+            Tetromino::T => RenderGlyph::new("T", "TT"),
+            Tetromino::S => RenderGlyph::new("S", "SS"),
+            Tetromino::Z => RenderGlyph::new("Z", "ZZ"),
+            Tetromino::J => RenderGlyph::new("J", "JJ"),
+            Tetromino::L => RenderGlyph::new("L", "LL"),
+        }
     }
 
     /// 返回当前方块在棋盘上使用的颜色。
@@ -408,7 +416,7 @@ pub struct GameTetris {
 
 impl GameTetris {
     /// 创建一个新的俄罗斯方块游戏实例。
-    pub fn new(size: GameSize) -> Self {
+    pub fn new(size: GameSize, render_mode: RenderMode) -> Self {
         if size.width < MIN_WIDTH || size.height < MIN_HEIGHT {
             return Self {
                 size,
@@ -421,7 +429,7 @@ impl GameTetris {
                 level: 1,
                 frame: 0,
                 drop_interval: BASE_DROP_INTERVAL,
-                buffer: RenderBuffer::new(size),
+                buffer: RenderBuffer::new(size, render_mode),
             };
         }
 
@@ -436,7 +444,7 @@ impl GameTetris {
             level: 1,
             frame: 0,
             drop_interval: BASE_DROP_INTERVAL,
-            buffer: RenderBuffer::new(size),
+            buffer: RenderBuffer::new(size, render_mode),
         };
         game.spawn_piece();
         game.update_symbols();
@@ -446,8 +454,8 @@ impl GameTetris {
     /// 返回内容区中用于绘制棋盘的左上角位置。
     fn board_origin(&self) -> Point {
         Point {
-            x: self.size.width.saturating_sub(BOARD_RENDER_WIDTH) as isize / 2,
-            y: self.size.height.saturating_sub(BOARD_RENDER_HEIGHT) as isize / 2,
+            x: self.size.width.saturating_sub(BOARD_WIDTH) as isize / 2,
+            y: self.size.height.saturating_sub(BOARD_HEIGHT) as isize / 2,
         }
     }
 
@@ -579,7 +587,6 @@ impl GameTetris {
     fn update_symbols(&mut self) {
         self.buffer.clear();
         self.fill_background();
-        self.draw_board_frame();
         self.draw_board_cells();
         self.draw_active_piece();
     }
@@ -588,49 +595,31 @@ impl GameTetris {
     fn fill_background(&mut self) {
         for y in 0..self.size.height as isize {
             for x in 0..self.size.width as isize {
-                self.buffer.set(Point { x, y }, " ", Color::Reset);
+                self.buffer.set(
+                    Point { x, y },
+                    RenderGlyph::new(" ", "  "),
+                    Style::new().fg(Color::Reset),
+                );
             }
-        }
-    }
-
-    /// 绘制棋盘边框。
-    fn draw_board_frame(&mut self) {
-        let origin = self.board_origin();
-        for x in 0..BOARD_RENDER_WIDTH as isize {
-            let symbol = if x == 0 || x == BOARD_RENDER_WIDTH as isize - 1 {
-                "+"
-            } else {
-                "-"
-            };
-            self.buffer
-                .set(origin.offset(x, 0), symbol, Color::DarkGray);
-            self.buffer.set(
-                origin.offset(x, BOARD_RENDER_HEIGHT as isize - 1),
-                symbol,
-                Color::DarkGray,
-            );
-        }
-        for y in 1..BOARD_RENDER_HEIGHT as isize - 1 {
-            self.buffer.set(origin.offset(0, y), "|", Color::DarkGray);
-            self.buffer.set(
-                origin.offset(BOARD_RENDER_WIDTH as isize - 1, y),
-                "|",
-                Color::DarkGray,
-            );
         }
     }
 
     /// 绘制所有已经锁定的格子和空棋盘底色。
     fn draw_board_cells(&mut self) {
-        let origin = self.board_origin().offset(1, 1);
+        let origin = self.board_origin();
         for y in 0..BOARD_HEIGHT {
             for x in 0..BOARD_WIDTH {
                 let point = origin.offset(x as isize, y as isize);
                 let Some(kind) = self.board.cells[y][x] else {
-                    self.buffer.set(point, ".", Color::DarkGray);
+                    self.buffer.set(
+                        point,
+                        RenderGlyph::new(".", ".."),
+                        Style::new().fg(Color::DarkGray),
+                    );
                     continue;
                 };
-                self.buffer.set(point, kind.symbol(), kind.color());
+                self.buffer
+                    .set(point, kind.glyph(), Style::new().fg(kind.color()));
             }
         }
     }
@@ -640,12 +629,12 @@ impl GameTetris {
         let Some(active) = self.active else {
             return;
         };
-        let origin = self.board_origin().offset(1, 1);
+        let origin = self.board_origin();
         for point in active.points() {
             self.buffer.set(
                 origin.offset(point.x, point.y),
-                active.kind.symbol(),
-                active.kind.color(),
+                active.kind.glyph(),
+                Style::new().fg(active.kind.color()),
             );
         }
     }
@@ -676,7 +665,7 @@ impl GameTetris {
                 .into_iter()
                 .map(|filled| {
                     if filled {
-                        Span::styled(kind.symbol(), kind.color())
+                        Span::styled(kind.glyph().single, kind.color())
                     } else {
                         Span::styled(".", Color::DarkGray)
                     }

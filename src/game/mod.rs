@@ -90,17 +90,47 @@ pub struct GameSize {
     pub height: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Default)]
+pub enum RenderMode {
+    Single,
+    #[default]
+    Double,
+}
+
+impl RenderMode {
+    /// 返回当前渲染模式下每个格子占用的终端列数。
+    pub const fn cell_width(self) -> usize {
+        match self {
+            RenderMode::Single => 1,
+            RenderMode::Double => 2,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RenderGlyph {
+    pub single: &'static str,
+    pub double: &'static str,
+}
+
+impl RenderGlyph {
+    /// 创建一组单字符和双字符显示符号。
+    pub const fn new(single: &'static str, double: &'static str) -> Self {
+        Self { single, double }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct RenderCell {
-    pub symbol: &'static str,
-    pub color: Color,
+    pub glyph: RenderGlyph,
+    pub style: Style,
 }
 
 impl RenderCell {
     pub const fn empty() -> Self {
         Self {
-            symbol: EMPTY_SYMBOL,
-            color: EMPTY_COLOR,
+            glyph: RenderGlyph::new(EMPTY_SYMBOL, ".."),
+            style: Style::new().fg(EMPTY_COLOR),
         }
     }
 }
@@ -108,12 +138,14 @@ impl RenderCell {
 #[derive(Debug)]
 pub struct RenderBuffer {
     cells: Vec<Vec<RenderCell>>,
+    mode: RenderMode,
 }
 
 impl RenderBuffer {
-    pub fn new(size: GameSize) -> Self {
+    pub fn new(size: GameSize, mode: RenderMode) -> Self {
         Self {
             cells: vec![vec![RenderCell::empty(); size.width]; size.height],
+            mode,
         }
     }
 
@@ -123,7 +155,7 @@ impl RenderBuffer {
         }
     }
 
-    pub fn set(&mut self, point: Point, symbol: &'static str, color: Color) {
+    pub fn set(&mut self, point: Point, glyph: RenderGlyph, style: Style) {
         if point.x < 0 || point.y < 0 {
             return;
         }
@@ -133,7 +165,7 @@ impl RenderBuffer {
         let Some(cell) = row.get_mut(point.x as usize) else {
             return;
         };
-        *cell = RenderCell { symbol, color };
+        *cell = RenderCell { glyph, style };
     }
 
     pub fn symbol_at(&self, point: Point) -> &'static str {
@@ -143,7 +175,7 @@ impl RenderBuffer {
         self.cells
             .get(point.y as usize)
             .and_then(|row| row.get(point.x as usize))
-            .map(|cell| cell.symbol)
+            .map(|cell| cell.glyph.single)
             .unwrap_or(EMPTY_SYMBOL)
     }
 
@@ -152,7 +184,13 @@ impl RenderBuffer {
         for row in &self.cells {
             let spans: Vec<_> = row
                 .iter()
-                .map(|cell| Span::styled(cell.symbol, Style::new().fg(cell.color)))
+                .map(|cell| {
+                    let symbol = match self.mode {
+                        RenderMode::Single => cell.glyph.single,
+                        RenderMode::Double => cell.glyph.double,
+                    };
+                    Span::styled(symbol, cell.style)
+                })
                 .collect();
             lines.push(Line::from(spans));
         }
