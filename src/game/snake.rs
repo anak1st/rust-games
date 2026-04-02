@@ -1,4 +1,7 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::{
+    event::{KeyCode, KeyEvent},
+    style,
+};
 use rand::RngExt;
 use ratatui::{
     style::{Color, Style, Stylize},
@@ -390,11 +393,21 @@ impl Renderable for Snake {
         if !self.is_alive() {
             return;
         }
+        let (head_style, body_style) = match buffer.mode() {
+            RenderMode::Single => (
+                Style::new().fg(self.head_color),
+                Style::new().fg(self.body_color),
+            ),
+            RenderMode::Double => (
+                Style::new().fg(Color::Black).bg(self.head_color),
+                Style::new().fg(Color::Black).bg(self.body_color),
+            ),
+        };
         for (index, point) in self.body.iter().enumerate() {
             if index == 0 {
-                buffer.set(*point, self.head_symbol, Style::new().fg(self.head_color));
+                buffer.set(*point, self.head_symbol, head_style);
             } else {
-                buffer.set(*point, self.body_symbol, Style::new().fg(self.body_color));
+                buffer.set(*point, self.body_symbol, body_style);
             }
         }
     }

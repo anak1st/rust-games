@@ -149,6 +149,10 @@ impl RenderBuffer {
         }
     }
 
+    pub const fn mode(&self) -> RenderMode {
+        self.mode
+    }
+
     pub fn clear(&mut self) {
         for row in &mut self.cells {
             row.fill(RenderCell::empty());
