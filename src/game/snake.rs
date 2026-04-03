@@ -21,8 +21,8 @@ const INSTRUCTIONS: [Instruction; 2] = [
     },
 ];
 
-const MIN_WIDTH: usize = 12;
-const MIN_HEIGHT: usize = 8;
+const MIN_WIDTH: usize = 20;
+const MIN_HEIGHT: usize = 20;
 const FRAMES_PER_STEP: usize = 4;
 const FOOD_COUNT: usize = 3;
 const AI_COUNT: usize = 4;
