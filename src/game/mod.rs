@@ -10,7 +10,6 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
 
 pub const EMPTY_SYMBOL: &str = ".";
-pub const EMPTY_COLOR: Color = Color::DarkGray;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Vec2 {
@@ -138,7 +137,7 @@ impl RenderCell {
     pub const fn empty() -> Self {
         Self {
             glyph: RenderGlyph::new(EMPTY_SYMBOL, ".."),
-            style: Style::new().fg(EMPTY_COLOR),
+            style: Style::new().fg(Color::DarkGray),
         }
     }
 }
@@ -178,6 +177,14 @@ impl RenderBuffer {
             return;
         };
         *cell = RenderCell { glyph, style };
+    }
+
+    pub fn set_bg_color(&mut self, color: Color) {
+        for row in &mut self.cells {
+            for cell in row {
+                cell.style = cell.style.bg(color);
+            }
+        }
     }
 
     pub fn symbol_at(&self, point: Vec2) -> &'static str {

@@ -668,14 +668,16 @@ impl GameTetris {
     /// 重建当前帧的渲染缓存。
     fn update_symbols(&mut self) {
         self.buffer.clear();
+        self.buffer.set_bg_color(Color::DarkGray);
+
         let origin = self.board_origin();
 
         for y in 0..BOARD_HEIGHT {
             for x in 0..BOARD_WIDTH {
                 self.buffer.set(
                     origin.offset(x as isize, y as isize),
-                    RenderGlyph::new(" ", "  "),
-                    Style::new().fg(Color::Reset),
+                    RenderGlyph::new(".", ".."),
+                    Style::new().fg(Color::DarkGray),
                 );
             }
         }
