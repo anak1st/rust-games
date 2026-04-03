@@ -692,6 +692,20 @@ impl GameTetris {
                 .render(&mut self.buffer, self.frame);
         }
     }
+
+    /// 渲染下一个方块的预览文本。
+    fn render_next(&self) -> Text<'static> {
+        let mut preview_buffer = RenderBuffer::new(
+            GameSize {
+                width: 4,
+                height: 4,
+            },
+            self.buffer.render_mode(),
+        );
+        let preview_piece = TetrisPiece::new(self.next, Vec2::default());
+        preview_piece.render(&mut preview_buffer, self.frame);
+        preview_buffer.to_text()
+    }
 }
 
 impl Game for GameTetris {
@@ -728,15 +742,7 @@ impl Game for GameTetris {
             self.next.name().fg(self.next.color()),
         ]));
 
-        let mut preview_buffer = RenderBuffer::new(
-            GameSize {
-                width: 4,
-                height: 4,
-            },
-            self.buffer.render_mode(),
-        );
-        TetrisPiece::new(self.next, Vec2::default()).render(&mut preview_buffer, self.frame);
-        lines.extend(preview_buffer.to_text().lines);
+        lines.extend(self.render_next().lines);
 
         lines.extend([
             Line::from(vec!["分数: ".into(), self.score.to_string().yellow()]),
@@ -755,6 +761,7 @@ impl Game for GameTetris {
                 format!("{} x {}", self.size.width, self.size.height).into(),
             ]),
         ]);
+        
         Text::from(lines)
     }
 
