@@ -1,7 +1,4 @@
-use crossterm::{
-    event::{KeyCode, KeyEvent},
-    style,
-};
+use crossterm::event::{KeyCode, KeyEvent};
 use rand::RngExt;
 use ratatui::{
     style::{Color, Style, Stylize},
@@ -9,8 +6,8 @@ use ratatui::{
 };
 
 use crate::game::{
-    Direction, EMPTY_SYMBOL, Game, GameSize, GameStatus, Instruction, Point, RenderBuffer,
-    RenderGlyph, RenderMode, Renderable,
+    Direction, EMPTY_SYMBOL, Game, GameSize, GameStatus, Instruction, RenderBuffer, RenderGlyph,
+    RenderMode, Renderable, Vec2,
 };
 
 const INSTRUCTIONS: [Instruction; 2] = [
@@ -43,7 +40,7 @@ enum FoodKind {
 
 #[derive(Debug, Clone, Copy)]
 struct Food {
-    point: Point,
+    point: Vec2,
     growth: usize,
     symbol: RenderGlyph,
     color: Color,
@@ -52,16 +49,16 @@ struct Food {
 
 impl Food {
     /// 创建一个常规刷新的食物，其中有概率变成超级食物。
-    fn new(point: Point) -> Self {
+    fn new(point: Vec2) -> Self {
         let mut rng = rand::rng();
         let is_super = rng.random_range(0..SUPER_FOOD_CHANCE_DENOMINATOR) == 0;
         Self {
             point,
             growth: if is_super { 4 } else { 1 },
             symbol: if is_super {
-                RenderGlyph::new("$", "$$")
+                RenderGlyph::new("$", "{}")
             } else {
-                RenderGlyph::new("*", "**")
+                RenderGlyph::new("*", "()")
             },
             color: Color::Yellow,
             kind: if is_super {
@@ -73,7 +70,7 @@ impl Food {
     }
 
     /// 使用尸块片段创建一个同色食物。
-    fn from_corpse(point: Point, color: Color) -> Self {
+    fn from_corpse(point: Vec2, color: Color) -> Self {
         Self {
             point,
             growth: 1,
@@ -104,7 +101,7 @@ impl Renderable for Food {
 
 #[derive(Debug)]
 struct Corpse {
-    point: Point,
+    point: Vec2,
     symbol: RenderGlyph,
     color: Color,
     food_remaining: usize,
@@ -112,7 +109,7 @@ struct Corpse {
 
 impl Corpse {
     /// 判断给定位置是否被尸块占用。
-    fn contains(&self, point: Point) -> bool {
+    fn contains(&self, point: Vec2) -> bool {
         self.point == point
     }
 
@@ -175,13 +172,13 @@ enum SnakeState {
 
 #[derive(Debug)]
 struct SnakeSpawn {
-    body: Vec<Point>,
+    body: Vec<Vec2>,
     direction: Direction,
 }
 
 #[derive(Debug)]
 struct Snake {
-    body: Vec<Point>,
+    body: Vec<Vec2>,
     direction: Direction,
     controller: SnakeController,
     head_symbol: RenderGlyph,
@@ -195,7 +192,7 @@ struct Snake {
 
 impl Snake {
     /// 创建玩家控制的蛇实例。
-    fn new_player(body: Vec<Point>, controller: SnakeController) -> Self {
+    fn new_player(body: Vec<Vec2>, controller: SnakeController) -> Self {
         Self {
             body,
             direction: Direction::Right,
@@ -211,7 +208,7 @@ impl Snake {
     }
 
     /// 创建 AI 控制的蛇实例。
-    fn new_ai(index: usize, body: Vec<Point>) -> Self {
+    fn new_ai(index: usize, body: Vec<Vec2>) -> Self {
         let head_symbol = match index {
             0 => RenderGlyph::new("A", "AA"),
             1 => RenderGlyph::new("B", "BB"),
@@ -248,12 +245,12 @@ impl Snake {
     }
 
     /// 返回蛇头所在的位置。
-    fn head(&self) -> Point {
+    fn head(&self) -> Vec2 {
         self.body[0]
     }
 
     /// 根据当前方向计算下一帧蛇头的位置。
-    fn head_next(&self) -> Point {
+    fn head_next(&self) -> Vec2 {
         self.head().step(self.direction)
     }
 
@@ -287,7 +284,7 @@ impl Snake {
     }
 
     /// 判断给定位置是否被整条蛇占用。
-    fn contains(&self, point: Point) -> bool {
+    fn contains(&self, point: Vec2) -> bool {
         self.is_alive() && self.body.contains(&point)
     }
 
@@ -393,7 +390,7 @@ impl Renderable for Snake {
         if !self.is_alive() {
             return;
         }
-        let (head_style, body_style) = match buffer.mode() {
+        let (head_style, body_style) = match buffer.render_mode() {
             RenderMode::Single => (
                 Style::new().fg(self.head_color),
                 Style::new().fg(self.body_color),
@@ -468,34 +465,34 @@ impl GameSnake {
     /// helper
 
     /// 判断给定位置是否被任意非食物物体占用。
-    fn is_occupied(&self, point: Point) -> bool {
+    fn is_occupied(&self, point: Vec2) -> bool {
         self.is_player_occupied(point)
             || self.is_snakes_occupied(point)
             || self.is_corpse_occupied(point)
     }
 
     /// 判断给定位置是否被玩家占用。
-    fn is_player_occupied(&self, point: Point) -> bool {
+    fn is_player_occupied(&self, point: Vec2) -> bool {
         self.player.contains(point)
     }
 
     /// 判断给定位置是否被任意一条蛇占用。
-    fn is_snakes_occupied(&self, point: Point) -> bool {
+    fn is_snakes_occupied(&self, point: Vec2) -> bool {
         self.snakes.iter().any(|snake| snake.contains(point))
     }
 
     /// 判断给定位置是否被任意尸块占用。
-    fn is_corpse_occupied(&self, point: Point) -> bool {
+    fn is_corpse_occupied(&self, point: Vec2) -> bool {
         self.corpses.iter().any(|corpse| corpse.contains(point))
     }
 
     /// 判断给定位置是否被任意食物占用。
-    fn is_foods_occupied(&self, point: Point) -> bool {
+    fn is_foods_occupied(&self, point: Vec2) -> bool {
         self.foods.iter().any(|food| food.point == point)
     }
 
     /// 判断位置是否在棋盘内。
-    fn is_inside(&self, point: Point) -> bool {
+    fn is_inside(&self, point: Vec2) -> bool {
         point.x >= 0
             && point.y >= 0
             && point.x < self.size.width as isize
@@ -503,7 +500,7 @@ impl GameSnake {
     }
 
     /// 判断一组位置是否可以安全放下一条蛇。
-    fn is_valid_points(&self, points: &[Point]) -> bool {
+    fn is_valid_points(&self, points: &[Vec2]) -> bool {
         points.iter().all(|point| {
             self.is_inside(*point) && !self.is_occupied(*point) && !self.is_foods_occupied(*point)
         })
@@ -538,15 +535,15 @@ impl GameSnake {
         let center_y = (size.height / 2) as isize;
         Snake::new_player(
             vec![
-                Point {
+                Vec2 {
                     x: center_x + 1,
                     y: center_y,
                 },
-                Point {
+                Vec2 {
                     x: center_x,
                     y: center_y,
                 },
-                Point {
+                Vec2 {
                     x: center_x - 1,
                     y: center_y,
                 },
@@ -563,44 +560,44 @@ impl GameSnake {
         for spawn in [
             SnakeSpawn {
                 body: vec![
-                    Point { x: 0, y: 0 },
-                    Point { x: 0, y: 1 },
-                    Point { x: 0, y: 2 },
+                    Vec2 { x: 0, y: 0 },
+                    Vec2 { x: 0, y: 1 },
+                    Vec2 { x: 0, y: 2 },
                 ],
                 direction: Direction::Right,
             },
             SnakeSpawn {
                 body: vec![
-                    Point { x: 0, y: 0 },
-                    Point { x: 1, y: 0 },
-                    Point { x: 2, y: 0 },
+                    Vec2 { x: 0, y: 0 },
+                    Vec2 { x: 1, y: 0 },
+                    Vec2 { x: 2, y: 0 },
                 ],
                 direction: Direction::Down,
             },
             SnakeSpawn {
                 body: vec![
-                    Point { x: right, y: 0 },
-                    Point { x: right, y: 1 },
-                    Point { x: right, y: 2 },
+                    Vec2 { x: right, y: 0 },
+                    Vec2 { x: right, y: 1 },
+                    Vec2 { x: right, y: 2 },
                 ],
                 direction: Direction::Left,
             },
             SnakeSpawn {
                 body: vec![
-                    Point { x: right, y: 0 },
-                    Point { x: right - 1, y: 0 },
-                    Point { x: right - 2, y: 0 },
+                    Vec2 { x: right, y: 0 },
+                    Vec2 { x: right - 1, y: 0 },
+                    Vec2 { x: right - 2, y: 0 },
                 ],
                 direction: Direction::Down,
             },
             SnakeSpawn {
                 body: vec![
-                    Point { x: 0, y: bottom },
-                    Point {
+                    Vec2 { x: 0, y: bottom },
+                    Vec2 {
                         x: 0,
                         y: bottom - 1,
                     },
-                    Point {
+                    Vec2 {
                         x: 0,
                         y: bottom - 2,
                     },
@@ -609,23 +606,23 @@ impl GameSnake {
             },
             SnakeSpawn {
                 body: vec![
-                    Point { x: 0, y: bottom },
-                    Point { x: 1, y: bottom },
-                    Point { x: 2, y: bottom },
+                    Vec2 { x: 0, y: bottom },
+                    Vec2 { x: 1, y: bottom },
+                    Vec2 { x: 2, y: bottom },
                 ],
                 direction: Direction::Up,
             },
             SnakeSpawn {
                 body: vec![
-                    Point {
+                    Vec2 {
                         x: right,
                         y: bottom,
                     },
-                    Point {
+                    Vec2 {
                         x: right,
                         y: bottom - 1,
                     },
-                    Point {
+                    Vec2 {
                         x: right,
                         y: bottom - 2,
                     },
@@ -634,15 +631,15 @@ impl GameSnake {
             },
             SnakeSpawn {
                 body: vec![
-                    Point {
+                    Vec2 {
                         x: right,
                         y: bottom,
                     },
-                    Point {
+                    Vec2 {
                         x: right - 1,
                         y: bottom,
                     },
-                    Point {
+                    Vec2 {
                         x: right - 2,
                         y: bottom,
                     },
@@ -664,7 +661,7 @@ impl GameSnake {
         let mut candidates = Vec::new();
         for y in 0..self.size.height as isize {
             for x in 0..self.size.width as isize {
-                let head = Point { x, y };
+                let head = Vec2 { x, y };
                 for direction in [
                     Direction::Up,
                     Direction::Down,
@@ -700,7 +697,7 @@ impl GameSnake {
             let mut empty_points = Vec::new();
             for y in 0..self.size.height as isize {
                 for x in 0..self.size.width as isize {
-                    let point = Point { x, y };
+                    let point = Vec2 { x, y };
                     if self.is_occupied(point) || self.is_foods_occupied(point) {
                         continue;
                     }
@@ -719,7 +716,7 @@ impl GameSnake {
     // update
 
     /// 估算蛇前进一步后，从新蛇头出发还能到达多少空位。
-    fn reachable_space_after_move(&self, next_head: Point, limit: usize) -> usize {
+    fn reachable_space_after_move(&self, next_head: Vec2, limit: usize) -> usize {
         let mut visited = vec![vec![false; self.size.width as usize]; self.size.height as usize];
         let mut stack = vec![next_head];
         let mut reachable = 0;
@@ -745,7 +742,7 @@ impl GameSnake {
                     continue;
                 }
                 if !matches!(
-                    self.buffer.symbol_at(Point {
+                    self.buffer.symbol_at(Vec2 {
                         x: next_point.x,
                         y: next_point.y,
                     }),
@@ -775,7 +772,7 @@ impl GameSnake {
         &self,
         snake: &Snake,
         other_snakes: &[&Snake],
-        next_head: Point,
+        next_head: Vec2,
         ate_food: bool,
     ) -> bool {
         if !self.is_inside(next_head) {
@@ -800,7 +797,7 @@ impl GameSnake {
     }
 
     /// 判断一个落点是否属于“虽然不撞，但最好避开”的风险位置。
-    fn is_next_risky(&self, snake: &Snake, other_snakes: &[&Snake], next_head: Point) -> bool {
+    fn is_next_risky(&self, snake: &Snake, other_snakes: &[&Snake], next_head: Vec2) -> bool {
         let near_other_head = other_snakes.iter().any(|other_snake| {
             if !other_snake.is_alive() {
                 return false;
@@ -1067,19 +1064,18 @@ impl Game for GameSnake {
     fn render_status(&self) -> Text<'static> {
         Text::from(vec![
             Line::from(vec![
-                "玩家控制: ".into(),
-                self.player.controller().label().fg(self.player.head_color),
+                "控制: ".into(),
+                self.player.controller().label().into(),
             ]),
             Line::from(vec![
-                "玩家方向: ".into(),
-                self.player.direction.label().fg(self.player.head_color),
+                "玩家: ".into(),
+                self.player.direction.label().into(),
+                ", ".into(),
+                self.player.score().to_string().into(),
             ]),
-            Line::from(vec![
-                "玩家分数: ".into(),
-                self.player.score().to_string().fg(self.player.head_color),
-            ]),
+            Line::from(vec!["敌人: ".into()]),
             Line::from(self.snakes.iter().enumerate().fold(
-                vec!["敌人方向: ".into()],
+                Vec::new(),
                 |mut spans, (index, snake)| {
                     if index > 0 {
                         spans.push(" ".into());
@@ -1089,7 +1085,7 @@ impl Game for GameSnake {
                 },
             )),
             Line::from(self.snakes.iter().enumerate().fold(
-                vec!["敌人分数: ".into()],
+                Vec::new(),
                 |mut spans, (index, snake)| {
                     if index > 0 {
                         spans.push(" ".into());

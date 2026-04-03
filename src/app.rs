@@ -21,7 +21,7 @@ use crate::game::{
 
 const TITLE_HEIGHT: u16 = 3;
 const FOOTER_HEIGHT: u16 = 3;
-const STATUS_WIDTH: u16 = 24;
+const STATUS_WIDTH: u16 = 20;
 const GAME_BORDER_SIZE: u16 = 2;
 const GAME_MIN_WIDTH: u16 = 20;
 const GAME_MIN_HEIGHT: u16 = 20;

@@ -13,27 +13,35 @@ pub const EMPTY_SYMBOL: &str = ".";
 pub const EMPTY_COLOR: Color = Color::DarkGray;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Point {
+pub struct Vec2 {
     pub x: isize,
     pub y: isize,
 }
 
-impl Point {
+impl Vec2 {
     /// 返回当前点到目标点的曼哈顿距离。
-    pub fn distance_to(self, other: Point) -> isize {
+    pub fn distance_to(self, other: Vec2) -> isize {
         (self.x - other.x).abs() + (self.y - other.y).abs()
     }
 
     /// 返回沿给定偏移量移动后的坐标。
-    pub fn offset(self, dx: isize, dy: isize) -> Point {
-        Point {
+    pub fn offset(self, dx: isize, dy: isize) -> Vec2 {
+        Vec2 {
             x: self.x + dx,
             y: self.y + dy,
         }
     }
 
+    /// 返回沿给定向量变换后的坐标。
+    pub fn transform(self, transform: Vec2) -> Vec2 {
+        Vec2 {
+            x: self.x + transform.x,
+            y: self.y + transform.y,
+        }
+    }
+
     /// 返回沿给定方向移动一步后的坐标。
-    pub fn step(self, direction: Direction) -> Point {
+    pub fn step(self, direction: Direction) -> Vec2 {
         match direction {
             Direction::Up => self.offset(0, -1),
             Direction::Down => self.offset(0, 1),
@@ -138,19 +146,19 @@ impl RenderCell {
 #[derive(Debug)]
 pub struct RenderBuffer {
     cells: Vec<Vec<RenderCell>>,
-    mode: RenderMode,
+    render_mode: RenderMode,
 }
 
 impl RenderBuffer {
     pub fn new(size: GameSize, mode: RenderMode) -> Self {
         Self {
             cells: vec![vec![RenderCell::empty(); size.width]; size.height],
-            mode,
+            render_mode: mode,
         }
     }
 
-    pub const fn mode(&self) -> RenderMode {
-        self.mode
+    pub const fn render_mode(&self) -> RenderMode {
+        self.render_mode
     }
 
     pub fn clear(&mut self) {
@@ -159,7 +167,7 @@ impl RenderBuffer {
         }
     }
 
-    pub fn set(&mut self, point: Point, glyph: RenderGlyph, style: Style) {
+    pub fn set(&mut self, point: Vec2, glyph: RenderGlyph, style: Style) {
         if point.x < 0 || point.y < 0 {
             return;
         }
@@ -172,7 +180,7 @@ impl RenderBuffer {
         *cell = RenderCell { glyph, style };
     }
 
-    pub fn symbol_at(&self, point: Point) -> &'static str {
+    pub fn symbol_at(&self, point: Vec2) -> &'static str {
         if point.x < 0 || point.y < 0 {
             return EMPTY_SYMBOL;
         }
@@ -189,11 +197,11 @@ impl RenderBuffer {
             let spans: Vec<_> = row
                 .iter()
                 .map(|cell| {
-                    let symbol = match self.mode {
+                    let glyph = match self.render_mode {
                         RenderMode::Single => cell.glyph.single,
                         RenderMode::Double => cell.glyph.double,
                     };
-                    Span::styled(symbol, cell.style)
+                    Span::styled(glyph, cell.style)
                 })
                 .collect();
             lines.push(Line::from(spans));
