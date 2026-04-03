@@ -74,6 +74,19 @@ enum Tetromino {
 }
 
 impl Tetromino {
+    /// 返回所有可用的俄罗斯方块类型。
+    const fn all() -> [Tetromino; 7] {
+        [
+            Tetromino::I,
+            Tetromino::O,
+            Tetromino::T,
+            Tetromino::S,
+            Tetromino::Z,
+            Tetromino::J,
+            Tetromino::L,
+        ]
+    }
+
     /// 返回当前方块在界面中展示的名称。
     fn name(self) -> &'static str {
         match self {
@@ -283,18 +296,27 @@ impl Tetromino {
 
     /// 随机生成一个俄罗斯方块类型。
     fn random() -> Self {
-        let kinds = [
-            Tetromino::I,
-            Tetromino::O,
-            Tetromino::T,
-            Tetromino::S,
-            Tetromino::Z,
-            Tetromino::J,
-            Tetromino::L,
-        ];
+        let kinds = Self::all();
         let mut rng = rand::rng();
         let index = rng.random_range(0..kinds.len());
         kinds[index]
+    }
+
+    /// 随机生成一个与给定类型不同的俄罗斯方块。
+    fn random_excluding(excluded: Tetromino) -> Self {
+        let all_kinds = Self::all();
+        let kinds = all_kinds
+            .iter()
+            .cloned()
+            .filter(|&k| k != excluded)
+            .collect::<Vec<_>>();
+        let mut rng = rand::rng();
+        let index = rng.random_range(0..kinds.len());
+        let real_index = all_kinds
+            .iter()
+            .position(|&k| k == kinds[index])
+            .unwrap_or(0);
+        all_kinds[real_index]
     }
 }
 
@@ -308,6 +330,13 @@ impl TetrisCell {
     /// 创建一个新的俄罗斯方块单元格。
     fn new(point: Vec2, kind: Tetromino) -> Self {
         Self { point, kind }
+    }
+
+    /// 返回幽灵方块使用的符号和样式。
+    fn ghost_render_state(&self) -> (RenderGlyph, Style) {
+        let glyph = RenderGlyph::new(":", "[]");
+        let style = Style::new().fg(self.kind.color());
+        (glyph, style)
     }
 
     /// 返回平移后的单元格副本。
@@ -398,6 +427,16 @@ impl Renderable for TetrisPiece {
     fn render(&self, buffer: &mut RenderBuffer, frame: usize) {
         for cell in &self.cells {
             cell.render(buffer, frame);
+        }
+    }
+}
+
+impl TetrisPiece {
+    /// 使用偏暗样式渲染当前方块的最终落点预览。
+    fn render_ghost(&self, buffer: &mut RenderBuffer) {
+        for cell in &self.cells {
+            let (glyph, style) = cell.ghost_render_state();
+            buffer.set(cell.point, glyph, style);
         }
     }
 }
@@ -494,7 +533,7 @@ impl GameTetris {
     /// 生成新的活动方块，并预先抽取下一个方块。
     fn spawn_piece(&mut self) {
         let piece = TetrisPiece::new(self.next, Vec2 { x: 3, y: 0 });
-        self.next = Tetromino::random();
+        self.next = Tetromino::random_excluding(piece.kind);
         if !self.can_place(&piece) {
             self.active = None;
             self.status = GameStatus::Lost;
@@ -543,6 +582,27 @@ impl GameTetris {
         self.try_move_active(1, 0)
     }
 
+    /// 计算一个方块在当前棋盘上的最终落点和下落距离。
+    fn drop_target(&self, piece: &TetrisPiece) -> (TetrisPiece, usize) {
+        let mut dropped = piece.clone();
+        let mut distance = 0;
+        loop {
+            let next = dropped.clone().moved(0, 1);
+            if !self.can_place(&next) {
+                break;
+            }
+            dropped = next;
+            distance += 1;
+        }
+        (dropped, distance)
+    }
+
+    /// 返回当前活动方块的最终落点预览。
+    fn active_drop_preview(&self) -> Option<TetrisPiece> {
+        let active = self.active.as_ref()?;
+        Some(self.drop_target(active).0)
+    }
+
     /// 让活动方块向下移动一格，无法下落时立即锁定。
     fn soft_drop(&mut self) {
         if self.try_move_active(0, 1) {
@@ -557,15 +617,8 @@ impl GameTetris {
         let Some(active) = self.active.clone() else {
             return;
         };
-        let mut dropped = active;
-        loop {
-            let next = dropped.clone().moved(0, 1);
-            if !self.can_place(&next) {
-                break;
-            }
-            dropped = next;
-            self.score += 2;
-        }
+        let (dropped, distance) = self.drop_target(&active);
+        self.score += distance * 2;
         self.active = Some(dropped);
         self.lock_active();
     }
@@ -686,6 +739,10 @@ impl GameTetris {
             cell.transform(origin).render(&mut self.buffer, self.frame);
         }
 
+        if let Some(preview) = self.active_drop_preview() {
+            preview.transform(origin).render_ghost(&mut self.buffer);
+        }
+
         if let Some(active) = &self.active {
             active
                 .transform(origin)
@@ -761,7 +818,7 @@ impl Game for GameTetris {
                 format!("{} x {}", self.size.width, self.size.height).into(),
             ]),
         ]);
-        
+
         Text::from(lines)
     }
 
