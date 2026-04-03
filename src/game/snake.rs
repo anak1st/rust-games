@@ -74,7 +74,7 @@ impl Food {
         Self {
             point,
             growth: 1,
-            symbol: RenderGlyph::new("*", "**"),
+            symbol: RenderGlyph::new("*", "[]"),
             color,
             kind: FoodKind::Corpse,
         }
@@ -125,7 +125,11 @@ impl Corpse {
 
 impl Renderable for Corpse {
     fn render(&self, buffer: &mut RenderBuffer, _frame: usize) {
-        buffer.set(self.point, self.symbol, Style::new().fg(self.color));
+        let style = match buffer.render_mode() {
+            RenderMode::Single => Style::new().fg(self.color),
+            RenderMode::Double => Style::new().fg(Color::Black).bg(self.color),
+        };
+        buffer.set(self.point, self.symbol, style);
     }
 }
 

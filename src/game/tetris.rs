@@ -122,7 +122,7 @@ impl Tetromino {
             Tetromino::S => Color::Green,
             Tetromino::Z => Color::Red,
             Tetromino::J => Color::Blue,
-            Tetromino::L => Color::LightYellow,
+            Tetromino::L => Color::White,
         }
     }
 
